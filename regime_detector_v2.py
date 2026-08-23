@@ -12,7 +12,7 @@ Implements ALL next-steps from the session summary:
   ✓ FastAPI wrapper skeleton (serve predictions as REST API)
   ✓ Alert system (email/Telegram notification on regime transition)
 
-Author: Claude (Anthropic) — v2, 2026
+Author: Vansh Mohla, 2026
 """
 
 import numpy as np
