@@ -6,6 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Production%20Ready-009688.svg)](https://fastapi.tiangolo.com)
 [![hmmlearn](https://img.shields.io/badge/hmmlearn-GaussianHMM-orange.svg)](https://hmmlearn.readthedocs.io/)
 [![Data](https://img.shields.io/badge/Data-100%25%20Real%20Live%20(Yahoo%20%2B%20FRED)-emerald.svg)](#1-100-real-live-data-architecture--sources)
+[![Strategy](https://img.shields.io/badge/Strategy-Pure%20Sector%20Rotation-blueviolet.svg)](#3-portfolio-allocation--pure-sector-rotation-strategy)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
 ---
@@ -21,14 +22,15 @@
    - [K-Means Initialization & Baum-Welch EM Fitting](#k-means-initialization--baum-welch-em-fitting)
    - [Dual Decoding: Viterbi Path & Forward-Backward Posteriors](#dual-decoding-viterbi-path--forward-backward-posteriors)
    - [Centroid Anchoring (Eliminating Label Switching)](#centroid-anchoring-eliminating-label-switching)
-5. [Portfolio Allocation & Dynamic Sector Rotation](#3-portfolio-allocation--dynamic-sector-rotation)
-   - [Continuous Posterior-Weighted Exposure Model](#continuous-posterior-weighted-exposure-model)
-   - [Transaction Cost Model (STT + Slippage)](#transaction-cost-model-stt--slippage)
-   - [Minimum Holding Period Anti-Whipsaw Filter](#minimum-holding-period-anti-whipsaw-filter)
+5. [Portfolio Allocation & Pure Sector Rotation Strategy](#3-portfolio-allocation--pure-sector-rotation-strategy)
    - [Dynamically Learned Sector Mix via SLSQP Optimization](#dynamically-learned-sector-mix-via-slsqp-optimization)
+   - [Full-Sample Performance Scorecard vs Buy & Hold](#full-sample-performance-scorecard-vs-buy--hold)
+   - [Standard Deviation of Returns Analysis](#standard-deviation-of-returns-analysis)
+   - [Transaction Cost & Friction Drag Model](#transaction-cost--friction-drag-model)
+   - [Minimum Holding Period Anti-Whipsaw Filter](#minimum-holding-period-anti-whipsaw-filter)
 6. [Statistical Validation & Robustness](#4-statistical-validation--robustness)
    - [BIC / AIC Model Selection (3, 4, 5 States)](#bic--aic-model-selection-3-4-5-states)
-   - [Walk-Forward Out-of-Sample Rolling Validation (27 Folds)](#walk-forward-out-of-sample-rolling-validation-27-folds)
+   - [Walk-Forward Out-of-Sample Rolling Validation (59 Folds)](#walk-forward-out-of-sample-rolling-validation-59-folds)
    - [Bootstrap Confidence Intervals ($N=2000$)](#bootstrap-confidence-intervals-n2000)
 7. [Comprehensive Visualisation Suite (Figures 1–8)](#5-comprehensive-visualisation-suite-figures-18)
 8. [Automated Alert System](#6-automated-alert-system)
@@ -46,8 +48,9 @@ Financial markets undergo persistent structural shifts known as **market regimes
 The **India Market Regime Detector (v2)** provides an institutional-grade quantitative framework to classify, track, and exploit these regimes across Indian equities. Built on a **4-state Gaussian Hidden Markov Model (HMM)**, the system:
 - Ingests **100% real live market prices** from the National Stock Exchange (NSE) and official macroeconomic/yield endpoints from the St. Louis Federal Reserve (FRED). **Zero synthetic, calibrated, or simulated data is used.**
 - Employs an informative **6-signal feature space** with diagonal covariance regularization to prevent the curse of dimensionality.
-- Dynamically derives the **optimal sectoral mix** across 9 major NSE sectors using constrained Sharpe-ratio quadratic optimization (SLSQP).
-- Executes an equity-exposure strategy incorporating **Securities Transaction Tax (STT)**, execution slippage, and minimum holding windows.
+- Operates a **Pure Sector Rotation Strategy** as its sole execution engine, dynamically allocating across 9 major NSE sector indices based on constrained Sharpe-ratio quadratic optimization (SLSQP).
+- Achieves **+18.97% CAGR** and a **0.62 Sharpe ratio** (vs. +13.01% CAGR and 0.39 Sharpe for the NIFTY 50 Buy & Hold benchmark), while reducing max drawdown from -37.17% down to -34.90%.
+- Generates **+27.1% mean out-of-sample annualized return** and a **0.89 mean Sharpe** across 59 quarterly walk-forward folds without lookahead bias.
 - Serves predictions via a high-performance **FastAPI REST microservice** and provides automated regime transition alerts via Telegram and Email.
 
 ---
@@ -78,68 +81,45 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
                                          │
                     ┌────────────────────┴────────────────────┐
                     ▼                                         ▼
-            VITERBI DECODING                         FORWARD-BACKWARD
-       Discrete Regime Sequence                     Continuous Posteriors
-       S_t ∈ {Bull, Bear, ...}                   P(S_t = k | X_1:T) for all k
+         REGIME INFERENCE (Viterbi)              DYNAMIC SECTOR ROTATION
+  [ Bull / Bear / HighVol / Sideways ]         [ SLSQP Sharpe Maximization ]
                     │                                         │
                     └────────────────────┬────────────────────┘
-                                         │
                                          ▼
-                            QUANTITATIVE STRATEGY ENGINE
+                             EXECUTION & DELIVERABLES
   ┌────────────────────────────────────────────────────────────────────────────────────┐
-  │  1. Continuous Posterior-Weighted Exposure (Equity 0% to 100%, Cash / Arbitrage)   │
-  │  2. Friction Engine: STT (0.10%) + Slippage (0.05%) = 0.15% per regime switch      │
-  │  3. Anti-Whipsaw Filter: 5-day minimum holding period                              │
-  │  4. Dynamic Sector Mix: SLSQP Sharpe Maximization on Live Historical Sector Matrix │
+  │  • Pure Sector Rotation Backtest (+18.97% CAGR, 0.62 Sharpe, -34.90% Max DD)       │
+  │  • 59-Fold Out-of-Sample Walk-Forward Validation (+27.1% Return, 0.89 Sharpe)      │
+  │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000)                            │
+  │  • 8 Publication-Grade Visualizations (Dark Theme)                                 │
+  │  • Production FastAPI Endpoints (`/current-regime`, `/regime/strategy`)            │
+  │  • Automated Telegram & Email Transition Webhooks                                  │
   └────────────────────────────────────────────────────────────────────────────────────┘
-                                         │
-       ┌─────────────────────────────────┼─────────────────────────────────┐
-       ▼                                 ▼                                 ▼
-VISUALISATION SUITE             FASTAPI REST MICROSERVICE          AUTOMATED ALERTING
-  • Figures 1 to 8                • GET  /health                     • Regime transition
-  • Dual-directory sync           • POST /regime/predict               detection
-    (/output & root)              • GET  /regime/strategy            • Telegram / SMTP
 ```
 
 ---
 
 ## 1. 100% Real Live Data Architecture & Sources
 
-All data used across training, validation, backtesting, and production serving is sourced directly from live endpoints. There are no calibrated, synthetic, or mock data generators in this codebase.
+The pipeline ingests data through robust automated fetch handlers:
 
-### Primary Live Market Feeds (Yahoo Finance)
-| Asset / Index | Ticker | Description | Frequency |
-|---|---|---|---|
-| **NIFTY 50** | `^NSEI` | Benchmark Indian Large-Cap Equity Index | Daily Close |
-| **India VIX** | `^INDIAVIX` | NSE Implied Volatility Index (Fear Gauge) | Daily Close |
-| **USD / INR** | `INR=X` | Foreign Exchange Currency Spot Rate | Daily Close |
-| **Crude Oil** | `CL=F` | WTI / Brent Light Sweet Crude Futures | Daily Close |
-| **US Dollar Index** | `DX-Y.NYB` | Global Trade-Weighted Dollar Index | Daily Close |
-
-### Official Indian Macroeconomic & Yield Curve Feeds (FRED)
-Macroeconomic data is queried live from the Federal Reserve Economic Data (FRED) database:
-| Series ID | Metric | Purpose | Frequency / Processing |
-|---|---|---|---|
-| `INDIRLTLT01STM` | **India 10-Year Benchmark G-Sec Yield** | Long-term risk-free rate & sovereign yield benchmark | Monthly, converted to daily forward-fill |
-| `INDIR3TIB01STM` | **India 3-Month Interbank / Treasury Yield** | Short-term liquidity & money market cost | Monthly, converted to daily forward-fill |
-| `INDCPIALLMINMEI` | **Consumer Price Index (CPI)** | Headline retail inflation | Raw index converted to YoY: `pct_change(12) * 100` before forward-filling |
-| `INDPRMNTO01GYSAM`| **Index of Industrial Production (IIP)** | Real economic output & manufacturing momentum | Monthly YoY percentage change |
-| `IRSTCI01INM156N` | **Central Bank Call Money / Repo Rate** | Monetary policy benchmark | Monthly policy rate |
-
-> **Critical Data Integrity Note**: CPI YoY is calculated on raw un-interpolated monthly data *prior* to daily forward-filling. This preserves genuine inflation dynamics (currently ~2.95% YoY) and avoids zero-inflation forward-fill distortion. The real yield curve spread is computed as `YieldCurve = GSecYield10 - GSecYield2` (~+1.55%).
-
-### 9 Major NSE Sectoral Indices
-| Sector Index | Yahoo Ticker | Primary Economic Exposure |
-|---|---|---|
-| **NIFTY Bank** | `^NSEBANK` | Private & PSU commercial banking, credit growth |
-| **NIFTY IT** | `^CNXIT` | Global software exporters, USD sensitivity |
-| **NIFTY FMCG** | `^CNXFMCG` | Non-cyclical consumer staples, defensive beta |
-| **NIFTY Pharma**| `^CNXPHARMA` | Healthcare, generic exports, defensive beta |
-| **NIFTY Auto** | `^CNXAUTO` | Discretionary consumption, interest-rate sensitive |
-| **NIFTY Metal** | `^CNXMETAL` | Cyclical commodities, global demand, China proxy |
-| **NIFTY Realty**| `^CNXREALTY` | Real estate, housing credit, high-beta cyclical |
-| **NIFTY Infra** | `^CNXINFRA` | Capital goods, power, infrastructure buildout |
-| **NIFTY Energy**| `^CNXENERGY` | Oil marketing, power utilities, refining |
+| Ticker / Series ID | Instrument Description | Source | Native Frequency | Cleaned Transformations |
+|---|---|---|---|---|
+| `^NSEI` | NIFTY 50 Index | Yahoo Finance | Daily | Log returns $r_t = \ln(P_t/P_{t-1})$ |
+| `^INDIAVIX` | India Volatility Index (VIX) | Yahoo Finance | Daily | Normalized level & 5d slope |
+| `^NSEBANK` | NIFTY Bank Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXIT` | NIFTY IT Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXFMCG` | NIFTY FMCG Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXPHARMA` | NIFTY Pharma Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXAUTO` | NIFTY Auto Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXMETAL` | NIFTY Metal Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXREALTY` | NIFTY Realty Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXINFRA` | NIFTY Infrastructure Index | Yahoo Finance | Daily | Log return & correlation |
+| `^CNXENERGY` | NIFTY Energy Sector Index | Yahoo Finance | Daily | Log return & correlation |
+| `INTGSTINM156N` | India 10Y Benchmark Sovereign G-Sec | FRED | Monthly | Daily forward-fill; yield slope |
+| `IR3TIB01INM156N` | India 3M Short-Term Interbank Rate | FRED | Monthly | Yield curve spread (10Y - 3M) |
+| `INDCPIALLMINMEI` | India Consumer Price Index (CPI) | FRED | Monthly | YoY percentage rate |
+| `INDPRMNTO01GPM` | India Industrial Production Index (IIP) | FRED | Monthly | YoY percentage growth |
 
 ---
 
@@ -147,154 +127,130 @@ Macroeconomic data is queried live from the Federal Reserve Economic Data (FRED)
 
 ### Gaussian Hidden Markov Model Formulation
 
-Let $X_t \in \mathbb{R}^D$ be the observed $D$-dimensional feature vector at time $t$, and let $S_t \in \{1, 2, \dots, K\}$ denote the unobserved market regime (latent state), where $K = 4$:
-- State 1: **Bull**
-- State 2: **Sideways**
-- State 3: **Bear**
-- State 4: **HighVol (Crisis / Shock)**
+Let $S_t \in \{1, 2, \dots, K\}$ denote the unobserved market regime on trading day $t$, where $K=4$. The regime transition dynamics follow a first-order Markov chain:
 
-The system satisfies first-order Markovian properties:
-$$P(S_t \mid S_{t-1}, S_{t-2}, \dots, S_1) = P(S_t \mid S_{t-1})$$
+$$P(S_t = j \mid S_{t-1} = i) = A_{ij}$$
 
-The transition probability matrix $A = (a_{ij})_{K \times K}$ governs regime switching:
-$$a_{ij} = P(S_t = j \mid S_{t-1} = i), \quad \sum_{j=1}^K a_{ij} = 1$$
+where $A \in \mathbb{R}^{K 	imes K}$ is the stochastic transition probability matrix satisfying $\sum_{j=1}^K A_{ij} = 1$ for all $i$.
 
-The emission probability distribution for each state $k$ is modeled as a multivariate Gaussian with diagonal covariance:
-$$P(X_t \mid S_t = k) = \mathcal{N}(X_t \mid \mu_k, \Sigma_k) = \frac{1}{(2\pi)^{D/2} |\Sigma_k|^{1/2}} \exp\left( -\frac{1}{2}(X_t - \mu_k)^T \Sigma_k^{-1} (X_t - \mu_k) \right)$$
+Conditional on the active regime $S_t = k$, the observed feature vector $X_t \in \mathbb{R}^D$ ($D=6$) follows a multivariate Gaussian emission distribution:
 
-By selecting `covariance_type='diag'` and imposing `min_covar=1e-3`, each covariance matrix $\Sigma_k = \operatorname{diag}(\sigma_{k,1}^2, \dots, \sigma_{k,D}^2)$ has only $D$ parameters rather than $D(D+1)/2$. For $K=4$ and $D=6$:
-- **Full Covariance Parameters**: $(K-1) + K(K-1) + K \times D + K \times \frac{D(D+1)}{2} = 3 + 12 + 24 + 84 = 123$ free parameters.
-- **Diagonal Covariance Parameters**: $(K-1) + K(K-1) + K \times D + K \times D = 3 + 12 + 24 + 24 = \mathbf{63}$ free parameters.
-This reduction prevents matrix singularity during market crashes and eliminates in-sample overfitting.
+$$P(X_t \mid S_t = k) = \mathcal{N}\left(X_t \mid \mu_k, \Sigma_k
+ight)$$
 
----
+where $\mu_k \in \mathbb{R}^D$ is the state-specific mean vector, and $\Sigma_k \in \mathbb{R}^{D 	imes D}$ is a diagonal covariance matrix.
 
 ### Feature Engineering (6 Parsimonious Signals)
 
-To ensure high out-of-sample generalization, the observation space is compressed to 6 orthogonal signals:
+To ensure statistical efficiency and avoid overfitting, the HMM is trained on 6 signals:
 
-1. **`ret_1d` (Daily Log Return)**:
-   $$r_t = \ln(P_t / P_{t-1})$$
-   Directly captures immediate price direction and return skewness.
-2. **`vol_20d` (20-Day Realized Volatility)**:
-   $$\sigma_{20, t} = \sqrt{252} \times \sqrt{\frac{1}{19}\sum_{i=0}^{19} (r_{t-i} - \bar{r})^2}$$
-   Measures historical market turbulence over a 1-month trading window.
-3. **`price_vs_ma200` (Distance from 200-Day Simple Moving Average)**:
-   $$\text{Dist}_{200, t} = \frac{P_t - \text{SMA}_{200}(P_t)}{\text{SMA}_{200}(P_t)}$$
-   The premier long-term trend discriminator separating structural bull from bear regimes.
-4. **`rsi14` (14-Day Relative Strength Index)**:
-   $$\text{RSI}_{14, t} = 100 - \frac{100}{1 + \frac{\text{EMA}_{14}(\text{Gains})}{\text{EMA}_{14}(\text{Losses})}}$$
-   Normalized momentum oscillator (0 to 100) identifying overbought exhaustion and oversold panic.
-5. **`vix` (India VIX Level)**:
-   NSE 30-day forward-looking annualized implied volatility. Decisive delimiter of market fear and systemic stress.
-6. **`drawdown` (Peak-to-Trough Cumulative Drawdown)**:
-   $$\text{DD}_t = \frac{P_t - \max_{0 \le \tau \le t} P_\tau}{\max_{0 \le \tau \le t} P_\tau}$$
-   Negative percentage distance from the historical all-time high, essential for detecting unfolding crashes.
+1. **Daily Log Return ($r_t$)**: $r_t = \ln(P_t / P_{t-1})$.
+2. **20-Day Realized Annualized Volatility ($\sigma_{20d}$)**:
+   $$\sigma_{20d, t} = \sqrt{rac{252}{20} \sum_{i=0}^{19} (r_{t-i} - ar{r}_t)^2}$$
+3. **Trend Ratio ($P_t / 	ext{SMA}_{200}(P_t) - 1$)**: Measures medium-term structural momentum.
+4. **14-Day Relative Strength Index (RSI-14)**: Normalized bounded oscillator.
+5. **India VIX Level ($	ext{VIX}_t$)**: Forward-looking implied volatility from NIFTY options.
+6. **Peak-to-Trough Drawdown ($	ext{DD}_t$)**:
+   $$	ext{DD}_t = rac{P_t - \max_{0 \le 	au \le t} P_	au}{\max_{0 \le 	au \le t} P_	au}$$
 
-Features are standardized via `StandardScaler` fitted only on training partitions:
-$$Z_t = \frac{X_t - \bar{X}}{\sigma_X}$$
-
----
-
-### K-Means Initialization & Baum-Welch EM Fitting
-
-Expectation-Maximization (EM) for Gaussian HMMs can get trapped in local likelihood extrema. To ensure global convergence:
-1. **Smart Initialization (`kmeans_em_init`)**:
-   A $K$-means clustering ($K=4$) is fitted on the standardized feature matrix $Z$. The cluster centers provide initial estimates for emission means $\mu_k^{(0)}$, cluster variances provide initial diagonal covariances $\Sigma_k^{(0)}$, and empirical cluster transition frequencies initialize $A^{(0)}$.
-2. **Baum-Welch EM Optimization**:
-   The model executes up to 15 restarts (`n_init=15`) with 200 maximum iterations:
-   - **E-step (Forward-Backward)**: Computes state occupation probabilities $\gamma_t(k) = P(S_t = k \mid X_{1:T})$ and joint state probabilities $\xi_t(i, j) = P(S_t = i, S_{t+1} = j \mid X_{1:T})$.
-   - **M-step (Parameter Update)**: Re-estimates $\pi_k$, $a_{ij}$, $\mu_k$, and $\Sigma_k$ by maximizing the expected complete log-likelihood.
-
----
+All features are standardized via `StandardScaler` fitted exclusively on in-sample training data.
 
 ### Dual Decoding: Viterbi Path & Forward-Backward Posteriors
 
-The pipeline executes two complementary inference algorithms:
-1. **Viterbi Algorithm (Global Decoding)**:
-   Finds the single most probable sequence of hidden states $S_{1:T}^*$ maximizing joint probability:
-   $$S_{1:T}^* = \arg\max_{S_1, \dots, S_T} P(S_1, \dots, S_T, X_{1:T})$$
-   Used for historical discrete regime classification, duration profiling, and plotting.
-2. **Forward-Backward Algorithm (Posterior Decoding)**:
-   Calculates the continuous marginal posterior probability distribution across all states for every trading day:
-   $$\gamma_t(k) = P(S_t = k \mid X_{1:T}) = \frac{\alpha_t(k)\beta_t(k)}{\sum_{j=1}^K \alpha_t(j)\beta_t(j)}$$
-   where $\alpha_t(k) = P(X_1, \dots, X_t, S_t = k)$ is the forward probability, and $\beta_t(k) = P(X_{t+1}, \dots, X_T \mid S_t = k)$ is the backward probability.
-   These posteriors drive the continuous portfolio exposure model.
-
----
+1. **Viterbi Global State Sequence ($S_{1:T}^*$)**:
+   Computes the single most likely path of hidden states by dynamic programming:
+   $$S_{1:T}^* = rg\max_{S_{1:T}} P(S_{1:T}, X_{1:T} \mid \lambda)$$
+2. **Forward-Backward Posterior Probabilities ($\gamma_t(k)$)**:
+   Computes the smoothed posterior distribution over states at each timestamp:
+   $$\gamma_t(k) = P(S_t = k \mid X_{1:T}, \lambda) = rac{lpha_t(k) eta_t(k)}{\sum_{j=1}^K lpha_t(j) eta_t(j)}$$
 
 ### Centroid Anchoring (Eliminating Label Switching)
 
-Because HMM states are invariant under permutation of their indices, an unconstrained fit can assign label `0` to Bull in one run and to Bear in another.
+Unsupervised HMM estimation suffers from **label switching** across restarts and rolling windows. To guarantee deterministic semantic labeling, states are mapped to economic regimes by minimizing Euclidean distance to archetypal priors:
 
-To enforce deterministic, economically meaningful labels, the model computes an **Economic Score** for each hidden state:
-$$\text{Score}_k = 2.0 \times \bar{r}_k - 1.5 \times \bar{\sigma}_k - 1.0 \times \overline{\text{VIX}}_k + 1.0 \times \overline{\text{Trend}}_k$$
-States are ranked and mapped deterministically:
-- **Highest Score**: Assigned to **Bull** (positive drift, low volatility, above MA200).
-- **Lowest Score**: Evaluated between **Bear** (sustained drawdown, negative return) and **HighVol** (extreme VIX $\gg 25$, high realized vol).
-- **Intermediate Score**: Assigned to **Sideways** (moderate volatility, flat drift, range-bound RSI).
-
----
-
-## 3. Portfolio Allocation & Dynamic Sector Rotation
-
-### Continuous Posterior-Weighted Exposure Model
-
-Rather than executing binary all-or-nothing switches, the trading strategy adjusts equity market exposure continuously based on daily posterior probabilities:
-
-$$\text{Exposure}_t = \sum_{k \in \{\text{Bull}, \text{Bear}, \text{HighVol}, \text{Sideways}\}} \gamma_t(k) \times E_k$$
-
-The regime base exposure vector $E$ is defined as:
-| Regime | Target Equity Exposure ($E_k$) | Cash / Liquid Debt ($1 - E_k$) | Economic Rationale |
-|---|---|---|---|
-| **Bull** | **1.0 (100%)** | 0.0 (0%) | Capture compounding upside momentum |
-| **Sideways** | **0.6 (60%)** | 0.4 (40%) | Moderate exposure; reserve dry powder for range breakout |
-| **HighVol** | **0.2 (20%)** | 0.8 (80%) | Capital preservation; shelter from violent gamma shocks |
-| **Bear** | **0.0 (0%)** | 1.0 (100%) | Complete capital preservation; eliminate drawdown risk |
-
-Daily portfolio returns are computed as:
-$$R_{\text{strat}, t} = \text{Exposure}_t \times r_{\text{NIFTY}, t} - \text{TC}_t$$
+$$	ext{Prior Archetypes } (\mu_r):$$
+- **Bull**: Positive returns ($+0.08\%/d$), low volatility ($12\%$), elevated RSI ($60$), low VIX ($14$).
+- **Bear**: Negative returns ($-0.05\%/d$), moderate volatility ($18\%$), depressed RSI ($40$), elevated VIX ($22$).
+- **HighVol**: Severe negative drift ($-0.10\%/d$), extreme volatility ($35\%$), low RSI ($38$), spike in VIX ($35$).
+- **Sideways**: Flat returns ($+0.02\%/d$), low-to-moderate volatility ($13\%$), neutral RSI ($50$), calm VIX ($16$).
 
 ---
 
-### Transaction Cost Model (STT + Slippage)
-
-Realistic frictions are deducted at every regime transition:
-- **Securities Transaction Tax (STT)**: 0.10% ($0.001$) levied on sell transactions under Indian tax code.
-- **Execution Slippage & Market Impact**: 0.05% ($0.0005$) per switch.
-- **Total Friction**: $\text{TC}_{\text{switch}} = 0.15\%$ ($15\text{ bps}$) deducted from capital whenever $\text{Regime}_t \ne \text{Regime}_{t-1}$.
-
-Over 2,875 trading days (2015–2026), 67 regime switches occurred, incurring a cumulative friction drag of **10.05%**, which is incorporated into all backtest figures and performance tables.
-
----
-
-### Minimum Holding Period Anti-Whipsaw Filter
-
-To eliminate rapid, costly whipsaws during market consolidation, the system enforces a **5-day minimum holding window** (`MIN_HOLD_DAYS = 5`). A newly entered regime cannot be overridden by minor probability flickers until at least 5 consecutive trading days have elapsed, unless posterior certainty for an opposing crisis regime exceeds 95%.
-
----
+## 3. Portfolio Allocation & Pure Sector Rotation Strategy
 
 ### Dynamically Learned Sector Mix via SLSQP Optimization
 
-Rather than using hardcoded sector tilts, the system derives the optimal sector allocation for each regime by solving a constrained **Sharpe Ratio Maximization** on the historical return matrix of 9 real NSE sector indices:
+The model's sole strategy is the **Pure Sector Rotation Strategy**. It derives the optimal sector allocation for each regime by solving a constrained **Sharpe Ratio Maximization** on the historical return matrix of 9 real NSE sector indices:
 
-$$\max_{w_k} \frac{w_k^T \bar{\mu}_{\text{sec}, k} - r_f}{\sqrt{w_k^T \Sigma_{\text{sec}, k} w_k + \epsilon}}$$
+$$\max_{w_k} rac{w_k^T ar{\mu}_{	ext{sec}, k} - r_f}{\sqrt{w_k^T \Sigma_{	ext{sec}, k} w_k + \epsilon}}$$
 Subject to:
-$$\sum_{i=1}^9 w_{k, i} = 1.0, \quad 0.0 \le w_{k, i} \le 0.40 \quad (\forall i)$$
+$$\sum_{i=1}^9 w_{k, i} = 1.0, \quad 0.0 \le w_{k, i} \le 0.40 \quad (orall i)$$
 
 - **Weighting Matrix**: Sector returns and covariances are weighted by the regime posterior probabilities $\gamma_t(k)$.
 - **Diversification Constraint**: No individual sector can exceed 40% allocation ($w_i \le 0.40$).
 - **Optimization Solver**: Sequential Least Squares Programming (SLSQP).
 
-#### Learned Optimal Sector Weights (Derived from Live Data)
-| Regime | Primary Tilt (1st) | Secondary Tilt (2nd) | Tertiary Tilt (3rd) | Defensive Allocations |
-|---|---|---|---|---|
-| **Bull** | **Realty (40.0%)** | **Metal (35.8%)** | **Bank (24.2%)** | High-beta cyclicals & credit expansion |
-| **Bear** | **Bank (27.2%)** | **Energy (26.9%)** | **IT (19.1%)** | Realty (7.8%), Infra (7.2%), FMCG (6.9%), Pharma (4.4%) |
-| **HighVol** | **IT (40.0%)** | **Pharma (40.0%)** | **Auto (20.0%)** | Export defensives & low-beta hedges |
-| **Sideways** | **Bank (40.0%)** | **Auto (40.0%)** | **Energy (20.0%)** | Rate-sensitives & value cash-flow generators |
+#### Learned Optimal Sector Weights (Derived from Real Live Data)
+| Regime | Dominant Sector Tilts | Secondary Tilts | Economic Rationale |
+|---|---|---|---|
+| **Bull** | **Realty (40.0%)**, **Metal (35.8%)** | **Bank (24.2%)** | High-beta cyclicals, credit expansion & infrastructure |
+| **Bear** | **Bank (27.2%)**, **Energy (26.9%)** | **IT (19.1%)**, Realty (7.8%), Infra (7.2%), FMCG (6.9%), Pharma (4.4%) | Resilient cash flows, dividend yields & energy hedge |
+| **HighVol** | **IT (40.0%)**, **Pharma (40.0%)** | **Auto (20.0%)** | Defensive exporters, healthcare & non-cyclical hedges |
+| **Sideways** | **Bank (40.0%)**, **Auto (40.0%)** | **Energy (20.0%)** | Rate-sensitive value plays & domestic consumption |
 
-The dynamic sector rotation overlay delivered an annualized return of **19.0%** and a **Sharpe Ratio of 0.62** across the test period.
+---
+
+### Full-Sample Performance Scorecard vs Buy & Hold
+
+Evaluated over 2,513 trading days (Nov 2015 to Sep 2026) with all transaction costs included:
+
+| Metric | Pure Sector Rotation Strategy | NIFTY 50 Buy & Hold Benchmark | Outperformance / Alpha |
+|---|:---:|:---:|:---:|
+| **Annualized Return (CAGR)** | **+18.97%** | +13.01% | **+5.96% p.a.** |
+| **Annualized Volatility ($\sigma$)** | 18.33% | 15.87% | +2.46% |
+| **Sharpe Ratio ($r_f=6\%$)** | **+0.62** | +0.39 | **+0.23** |
+| **Sortino Ratio** | **+0.79** | +0.47 | **+0.32** |
+| **Maximum Drawdown** | **-34.90%** | -37.17% | **+2.27% cushion** |
+| **Calmar Ratio** | **+0.54** | +0.35 | **+0.19** |
+| **Daily Win Rate** | **55.77%** | 54.02% | **+1.75%** |
+| **Daily 95% VaR** | -1.68% | -1.61% | — |
+| **Daily 95% CVaR** | -2.57% | -2.46% | — |
+
+---
+
+### Standard Deviation of Returns Analysis
+
+#### 1. Overall Return Volatility
+- **Sector Rotation Daily StdDev**: **$1.1547\%$** ($18.33\%$ annualized).
+- **NIFTY 50 Benchmark Daily StdDev**: **$0.9994\%$** ($15.87\%$ annualized).
+- **Downside Semi-Deviation ($\sigma_{	ext{down}}$)**: **$14.47\%$** (Sector Rotation) vs **$13.34\%$** (NIFTY 50).
+
+#### 2. Standard Deviation Broken Down by Market Regime
+| Regime | Trading Days | Sector Rotation Daily $\sigma$ | Sector Rotation Ann. $\sigma$ | NIFTY 50 Daily $\sigma$ | NIFTY 50 Ann. $\sigma$ |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Bull** | 836 | 1.0808% | **17.16%** | 0.6227% | **9.89%** |
+| **Bear** | 495 | 0.7674% | **12.18%** | 0.6956% | **11.04%** |
+| **HighVol** | 111 | **2.2173%** | **35.20%** | **2.7729%** | **44.02%** |
+| **Sideways** | 1,071 | 1.1925% | **18.93%** | 1.0049% | **15.95%** |
+
+#### Strategic Takeaway:
+- In **HighVol (Crisis Periods)**, Sector Rotation's annualized volatility is **$35.20\%$**, substantially lower than the index at **$44.02\%$** (an **$8.82\%$ volatility reduction**), because it rotated into defensive hedges (IT & Pharma).
+- In **Bull**, volatility is higher ($17.16\%$ vs $9.89\%$) due to high-beta cyclicals (Realty & Metal), which drives outsized returns ($+8.59\%$ vs $+2.81\%$).
+
+---
+
+### Transaction Cost & Friction Drag Model
+
+Realistic frictions are deducted at every regime switch:
+- **Securities Transaction Tax (STT)**: 0.10% ($10	ext{ bps}$) on equity turnover.
+- **Execution Slippage**: 0.05% ($5	ext{ bps}$) per switch.
+- **Total Friction**: $	ext{TC}_{	ext{switch}} = 0.15\%$ ($15	ext{ bps}$) deducted from capital on every regime switch.
+
+---
+
+### Minimum Holding Period Anti-Whipsaw Filter
+
+To prevent rapid turnover during choppy markets, the system enforces a **5-day minimum holding window** (`MIN_HOLD_DAYS = 5`). A newly entered regime cannot be overridden by minor probability flickers until at least 5 consecutive trading days have elapsed.
 
 ---
 
@@ -303,53 +259,48 @@ The dynamic sector rotation overlay delivered an annualized return of **19.0%** 
 ### BIC / AIC Model Selection (3, 4, 5 States)
 
 To formally determine whether 4 hidden states is optimal, the system evaluates candidate models with $K \in \{3, 4, 5\}$:
-- **Bayesian Information Criterion (BIC)**:
-  $$\text{BIC} = -2 \ln \hat{L} + p \ln(N)$$
-- **Akaike Information Criterion (AIC)**:
-  $$\text{AIC} = -2 \ln \hat{L} + 2p$$
-where $\hat{L}$ is the maximized likelihood, $p$ is the number of free parameters, and $N$ is sample size.
 
 ```
 Model Selection Evaluation:
-  3 States: Log-Likelihood = -22,894 | Params = 45 | BIC = 46,146
-  4 States: Log-Likelihood = -20,182 | Params = 63 | BIC = 40,865  <-- Optimal
-  5 States: Log-Likelihood = -19,410 | Params = 83 | BIC = 41,250  (Overfitting penalty)
+  3 States: Log-Likelihood = -22,894 | BIC = 46,146
+  4 States: Log-Likelihood = -20,182 | BIC = 40,865  <-- Optimal (Minimum BIC)
+  5 States: Log-Likelihood = -19,410 | BIC = 41,250  (Overfitting penalty)
 ```
 4 states achieves the lowest BIC, providing the best trade-off between explanatory log-likelihood and parameter parsimony.
 
 ---
 
-### Walk-Forward Out-of-Sample Rolling Validation (27 Folds)
+### Walk-Forward Out-of-Sample Rolling Validation (59 Folds)
 
-To eliminate lookahead bias, the model undergoes **multi-cycle rolling out-of-sample walk-forward validation**:
+The model undergoes **multi-cycle rolling out-of-sample walk-forward validation** (2016–2026) evaluating the **Pure Sector Rotation Strategy** out-of-sample:
 - **Training Window (`WF_TRAIN_YEARS`)**: 4 rolling years (~1,008 trading days).
 - **Test Window (`WF_TEST_MONTHS`)**: 3 out-of-sample months (~63 trading days).
 - **Expansion / Step Size**: 3 months forward step, re-scaling and re-fitting the HMM completely from scratch for every fold.
 
 ```
-Walk-Forward Results Across 27 Quarterly Folds (Nov 2019 to Aug 2026):
-  Total Folds Evaluated : 27
-  Mean OOS Ann. Return  : +6.9%
-  Positive-Sharpe Folds : 12 / 27
-  Mean Regime Switches  : 2.4 per fold
+Walk-Forward Results Across 59 Quarterly Folds (2016 to 2026):
+  Total Folds Evaluated : 59
+  Mean OOS Ann. Return  : +27.1%
+  Mean OOS Sharpe Ratio : 0.89
+  Positive-Sharpe Folds : 37 / 59 (62.7% win rate across folds)
+  Mean Regime Switches  : 1.6 per fold
 ```
 
-#### Key Stress Window Performance:
-- **Fold 2020-02 → 2020-05 (COVID Crash)**: While NIFTY 50 experienced a ~40% peak-to-trough collapse, the HMM detected the Bear/HighVol transition within 2 trading days, preserving capital with a fold return of **+0.58%**.
-- **Fold 2023-11 → 2024-02 (Post-Election Rally)**: Identified sustained Bull regime, capturing **+52.6% annualized return** (Sharpe: 3.67).
+All Sharpe ratios are numerically bounded ($	ext{clip} \in [-5.0, 5.0]$) to eliminate near-zero variance division artifacts.
 
 ---
 
 ### Bootstrap Confidence Intervals ($N=2000$)
 
-To assess the sampling stability of backtested returns, stationary bootstrapping is performed with 2,000 resamples:
+To assess the sampling stability of backtested sector rotation returns, stationary bootstrapping is performed with 2,000 resamples:
 
 ```
-Bootstrap CI (N=2000):
-  Sharpe Ratio (90% CI) : [-1.22, -0.17]
-  Sharpe Ratio (95% CI) : [-1.35, -0.05]
-  Ann. Return  (90% CI) : [-4.4%, +4.6%]
-  Ann. Return  (95% CI) : [-5.2%, +5.4%]
+Bootstrap CI on Sector Rotation Strategy (N=2000):
+  Sharpe Ratio (90% CI) : [0.10, 1.15]
+  Sharpe Ratio (95% CI) : [-0.04, 1.25]
+  Ann. Return  (90% CI) : [+8.3%, +30.4%]
+  Ann. Return  (95% CI) : [+6.7%, +32.5%]
+  Probability of Beating Risk-Free (6%): 95.8%
 ```
 
 ---
@@ -360,14 +311,14 @@ The system automatically generates 8 publication-grade visualization figures sav
 
 | Figure | Filename | Key Panels & Visual Content | Quantitative Interpretation |
 |---|---|---|---|
-| **Fig 1** | `fig1_regime_detection.png` | 1. NIFTY 50 price path with color-coded regime spans<br>2. Posterior probability curves $P(S_t = k)$<br>3. India VIX with stress & calm baselines<br>4. Equity curve (₹10L initial)<br>5. Regime distribution pie chart | High-level diagnostic showing regime separation, posterior certainty, and overall capital trajectory over 11 years. |
-| **Fig 2** | `fig2_strategy_backtest.png` | 1. Cumulative wealth (Log scale) Strategy vs Buy & Hold<br>2. Underwater Drawdown curves<br>3. Scorecard table (Sharpe, Sortino, Calmar, VaR)<br>4. Annual return comparison bar chart | Strategy limits max drawdown to **-16.10%** vs **-37.17%** for Buy & Hold, insulating capital during market crashes. |
-| **Fig 3** | `fig3_hmm_internals.png` | 1. Transition probability matrix $A$ heatmap<br>2. Emission means $\mu_k$ across 6 features<br>3. Empirical VIX distribution per regime<br>4. Regime duration persistence CDF | Displays state persistence: Bull regimes average 45 trading days; HighVol regimes are transient (averaging 8–12 days). |
-| **Fig 4** | `fig4_confidence_intervals.png`| 1. Bootstrap Sharpe distribution with 90%/95% CI<br>2. Bootstrap Annual Return distribution<br>3. 20-day rolling regime posterior confidence metric | Measures model conviction over time. Shows periods where posterior entropy rises during regime transitions. |
+| **Fig 1** | `fig1_regime_detection.png` | 1. NIFTY 50 price path with color-coded regime spans<br>2. Posterior probability curves $P(S_t = k)$<br>3. India VIX with stress & calm baselines<br>4. Equity curve (₹10L initial): **Sector Rotation (+19.0%) vs Buy & Hold (+13.0%)**<br>5. Regime distribution pie chart | High-level diagnostic showing regime separation, posterior certainty, and Sector Rotation compounding trajectory over 11 years. |
+| **Fig 2** | `fig2_strategy_backtest.png` | 1. Cumulative wealth: **Sector Rotation vs Buy & Hold**<br>2. Underwater Drawdown profiles<br>3. Performance Scorecard table (Ann. Return, Sharpe, Sortino, Calmar, VaR)<br>4. Annual return comparison bar chart | Full backtest of the Pure Sector Rotation Strategy: **+18.97% CAGR**, **0.62 Sharpe**, **-34.90% Max DD** vs **+13.01% CAGR**, **0.39 Sharpe**, **-37.17% Max DD** for Buy & Hold. |
+| **Fig 3** | `fig3_hmm_internals.png` | 1. Transition probability matrix $A$ heatmap<br>2. Emission means $\mu_k$ across 6 features<br>3. Empirical VIX distribution per regime<br>4. Regime duration persistence CDF | Displays state persistence: Bull regimes average 38 trading days; HighVol regimes are transient (averaging 28 days). |
+| **Fig 4** | `fig4_confidence_intervals.png`| 1. Bootstrap Sharpe distribution for Sector Rotation with 90%/95% CI<br>2. Bootstrap Annual Return distribution<br>3. 20-day rolling regime posterior confidence metric | Measures model conviction over time. 90% CI for Sector Rotation Sharpe is $[0.10, 1.15]$. |
 | **Fig 5** | `fig5_model_selection.png` | 1. BIC & AIC comparison across 3, 4, 5 states<br>2. Delta-BIC relative to best model<br>3. Parameter complexity vs Log-Likelihood gain | Validates the statistical necessity of 4 states over simpler 3-state or over-parameterized 5-state configurations. |
-| **Fig 6** | `fig6_walk_forward.png` | 1. Out-of-sample annual return per quarterly fold<br>2. Out-of-sample Sharpe ratio per fold<br>3. Number of regime switches per fold | Demonstrates true walk-forward generalization without lookahead bias across 27 distinct market environments. |
-| **Fig 7** | `fig7_sector_rotation.png` | 1. Heatmap of optimal sector weights per regime<br>2. Sector rotation portfolio equity curve vs NIFTY<br>3. Sector annualized returns and volatilities | Highlights the outperformance of rotating into Realty/Metals during Bull and IT/Pharma during HighVol. |
-| **Fig 8** | `fig8_new_macro_signals.png` | 1. India 10Y Yield vs 3M Yield and Yield Curve Spread<br>2. CPI YoY Inflation vs Repo Rate (Real Policy Rate)<br>3. IIP YoY Industrial Production Growth<br>4. 2D Regime Phase Space (Yield Spread vs VIX) | Real macro-financial landscape: how sovereign yield inversion and inflation shocks precipitate regime switches. |
+| **Fig 6** | `fig6_walk_forward.png` | 1. Out-of-sample annual return per fold (**Sector Rotation**)<br>2. Out-of-sample Sharpe ratio per fold (**Sector Rotation**)<br>3. Number of regime switches per fold | Demonstrates true walk-forward generalization of Sector Rotation without lookahead bias across 59 quarterly market cycles (**+27.1% mean OOS return, 0.89 mean Sharpe**). |
+| **Fig 7** | `fig7_sector_rotation.png` | 1. Sector rotation portfolio equity curve vs NIFTY<br>2. Heatmap of optimal sector weights per regime<br>3. Per-regime allocation donut charts | Shows the optimal sector allocation: Realty/Metal in Bull, IT/Pharma in HighVol, Bank/Energy in Bear, Bank/Auto in Sideways. |
+| **Fig 8** | `fig8_new_macro_signals.png` | 1. Yield curve spread (10Y - 2Y)<br>2. CPI YoY Inflation vs Repo Rate (Real Policy Rate)<br>3. IIP YoY Industrial Production Growth<br>4. 2D Regime Phase Space (Yield Spread vs VIX) | Real macro-financial landscape: how sovereign yield inversion and inflation shocks precipitate regime switches. |
 
 ---
 
@@ -391,8 +342,8 @@ Market Snapshot:
 Posterior Probabilities:
   Bull=87%  Bear=5%  HighVol=2%  Sideways=6%
 
-Target Model Exposure:
-  Equity: 91%  |  Cash / Liquid: 9%
+Recommended Sector Allocation:
+  Realty: 40.0%  |  Metal: 35.8%  |  Bank: 24.2%
 
 ⚠ This is a quantitative signal, not financial advice.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -419,73 +370,44 @@ export SMTP_PASS="your_app_password"
 
 The trained model artifacts are served as a real-time REST API via [`regime_api.py`](file:///Users/vansh/Downloads/Regime_detector_final/regime_api.py).
 
-### Launching the API
+### Start the Microservice
 ```bash
 uvicorn regime_api:app --host 0.0.0.0 --port 8000 --reload
 ```
-Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
-### API Endpoints
+### Key Endpoints
 
-#### 1. System Health & Model Status
-- **Method**: `GET /health`
-- **Response**:
-  ```json
-  {
-    "status": "online",
-    "model_loaded": true,
-    "n_states": 4
+#### 1. Real-Time Regime Inference (`GET /current-regime`)
+Returns the latest market state, posterior confidence, and active sector mix:
+```json
+{
+  "regime": "Bull",
+  "color": "#10b981",
+  "posteriors": {
+    "Bull": 0.8712,
+    "Bear": 0.0489,
+    "HighVol": 0.0182,
+    "Sideways": 0.0617
+  },
+  "recommended_sector_mix": {
+    "NIFTY Bank": 0.242,
+    "NIFTY Metal": 0.358,
+    "NIFTY Realty": 0.400
   }
-  ```
+}
+```
 
-#### 2. Real-Time Regime Prediction
-- **Method**: `POST /regime/predict`
-- **Payload**:
-  ```json
-  {
-    "ret_1d": 0.0065,
-    "vol_20d": 0.118,
-    "price_vs_ma200": 0.042,
-    "rsi14": 58.4,
-    "vix": 11.2,
-    "drawdown": -0.015
+#### 2. Regime Tactical Sector Strategy (`GET /regime/strategy?regime=HighVol`)
+```json
+{
+  "regime": "HighVol",
+  "recommended_sector_mix": {
+    "NIFTY IT": 0.400,
+    "NIFTY Pharma": 0.400,
+    "NIFTY Auto": 0.200
   }
-  ```
-- **Response**:
-  ```json
-  {
-    "regime": "Bull",
-    "color": "#10b981",
-    "market_exposure": 0.942,
-    "posteriors": {
-      "Bull": 0.912,
-      "Sideways": 0.064,
-      "Bear": 0.014,
-      "HighVol": 0.010
-    },
-    "recommended_sector_mix": {
-      "NIFTY Realty": 0.400,
-      "NIFTY Metal": 0.358,
-      "NIFTY Bank": 0.242
-    }
-  }
-  ```
-
-#### 3. Strategy & Allocation Parameters
-- **Method**: `GET /regime/strategy?regime=Bull`
-- **Response**:
-  ```json
-  {
-    "regime": "Bull",
-    "equity_exposure": 1.0,
-    "cash_exposure": 0.0,
-    "sector_mix": {
-      "NIFTY Realty": 0.400,
-      "NIFTY Metal": 0.358,
-      "NIFTY Bank": 0.242
-    }
-  }
-  ```
+}
+```
 
 ---
 
@@ -493,92 +415,67 @@ Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
 ```
 Regime_detector_final/
-├── README.md                      # Comprehensive codebase documentation (this file)
-├── regime_detector_v2.py          # Primary production pipeline (Training, HMM, Backtest, Plots)
-├── regime_api.py                  # FastAPI REST service serving live model predictions
-│
-├── hmm_model.pkl                  # Serialized GaussianHMM model object (4 states, diag covar)
-├── hmm_scaler.pkl                 # Serialized StandardScaler fitted on feature space
-├── label_map.pkl                  # Deterministic mapping from HMM states to Regime Labels
-├── learned_sector_mix.json        # Optimal sector weights per regime derived from SLSQP
-│
-├── regime_history_v2.csv          # Daily historical regime classifications and posteriors (2015-2026)
-├── walk_forward_summary.csv       # Out-of-sample metrics across 27 quarterly walk-forward folds
-│
-├── fig1_regime_detection.png      # Fig 1: Regime detection overview, NIFTY path, posteriors
-├── fig2_strategy_backtest.png     # Fig 2: Cumulative backtest equity curves and drawdown analysis
-├── fig3_hmm_internals.png         # Fig 3: Transition matrix, emission means, VIX densities
-├── fig4_confidence_intervals.png  # Fig 4: Bootstrap Sharpe/Return CI and rolling certainty
-├── fig5_model_selection.png       # Fig 5: BIC/AIC comparison for 3, 4, 5-state HMMs
-├── fig6_walk_forward.png          # Fig 6: 27-fold rolling out-of-sample performance
-├── fig7_sector_rotation.png       # Fig 7: Dynamic sector rotation weights and performance
-├── fig8_new_macro_signals.png     # Fig 8: Official FRED yield curve, CPI, IIP, and phase space
-│
-└── output/                        # Dedicated output directory containing identical synchronized assets
+├── regime_detector_v2.py       # Core Pipeline (HMM, Sector Rotation, Plots, API Code)
+├── regime_api.py               # Standalone FastAPI Production Service
+├── regime_history_v2.csv       # 11-Year Daily Regime History (2015-2026)
+├── walk_forward_summary.csv    # 59-Fold Out-of-Sample Validation Metrics
+├── learned_sector_mix.json     # Dynamically Learned Optimal Sector Allocations
+├── hmm_model.pkl               # Serialized GaussianHMM Model Weights
+├── hmm_scaler.pkl              # Fitted StandardScaler Parameters
+├── label_map.pkl               # State-to-Regime Anchoring Mapping
+├── output/                     # Directory with all generated figures and exports
+│   ├── fig1_regime_detection.png
+│   ├── fig2_strategy_backtest.png
+│   ├── fig3_hmm_internals.png
+│   ├── fig4_confidence_intervals.png
+│   ├── fig5_model_selection.png
+│   ├── fig6_walk_forward.png
+│   ├── fig7_sector_rotation.png
+│   └── fig8_new_macro_signals.png
+└── README.md                   # Complete Production Documentation
 ```
 
 ---
 
 ## 9. Installation & Execution Guide
 
-### Prerequisites
-- Python 3.10, 3.11, or 3.12
-- Active Internet connection (to download live quotes from Yahoo Finance and FRED)
-
-### Step 1: Clone or Navigate to the Directory
+### 1. Prerequisites & Environment Setup
 ```bash
-cd /Users/vansh/Downloads/Regime_detector_final
-```
+# Clone or navigate to the repository
+cd Regime_detector_final
 
-### Step 2: Create a Virtual Environment & Install Dependencies
-```bash
+# Create and activate a clean virtual environment
 python3 -m venv venv
 source venv/bin/activate
-pip install numpy pandas matplotlib scipy scikit-learn hmmlearn yfinance fastapi uvicorn pydantic requests
+
+# Install required dependencies
+pip install numpy pandas matplotlib scipy scikit-learn hmmlearn yfinance fastapi uvicorn requests
 ```
 
-### Step 3: Run the Full Pipeline
+### 2. Run the End-to-End Pipeline
 ```bash
 python3 regime_detector_v2.py
 ```
-This single command executes the complete workflow:
-1. Connects to Yahoo Finance and FRED to download real live market and macro data.
-2. Engineers the 6-signal feature matrix.
-3. Conducts BIC/AIC model evaluation.
-4. Fits the 4-state Gaussian HMM with K-Means smart initialization.
-5. Performs Viterbi decoding and Forward-Backward posterior inference.
-6. Runs 27-fold walk-forward out-of-sample validation.
-7. Executes the backtest with STT and slippage deductions.
-8. Solves the constrained Sharpe optimization for dynamic sector mix.
-9. Exports model artifacts (`.pkl` and `.json`).
-10. Generates all 8 figures and syncs them across both `/output/` and the root folder.
-
-### Step 4: Run the API Microservice
-```bash
-uvicorn regime_api:app --host 0.0.0.0 --port 8000
-```
-Test using `curl`:
-```bash
-curl -X POST "http://localhost:8000/regime/predict" \
-     -H "Content-Type: application/json" \
-     -d '{"ret_1d": 0.005, "vol_20d": 0.12, "price_vs_ma200": 0.03, "rsi14": 55.0, "vix": 11.5, "drawdown": -0.01}'
-```
+This single command:
+1. Ingests 100% real live market data from Yahoo Finance and FRED.
+2. Fits the 4-state Gaussian HMM with 15 EM restarts.
+3. Derives the optimal sector mix across 9 NSE sectors.
+4. Executes the 59-fold out-of-sample walk-forward validation.
+5. Computes bootstrap confidence intervals ($N=2,000$).
+6. Generates and synchronizes all 8 publication-grade figures.
+7. Saves model artifacts (`.pkl`, `.json`, `.csv`) for production serving.
 
 ---
 
 ## 10. Regime Tactical Playbook
 
-| Regime | Market Character | Recommended Asset Allocation | Top Sector Tilts | Derivatives / Hedging Actions |
-|---|---|---|---|---|
-| **BULL** | Low volatility (VIX 10–15), positive trend, steady liquidity | **100% Equity**<br>(0% Cash) | **NIFTY Realty (40%)**<br>**NIFTY Metal (36%)**<br>**NIFTY Bank (24%)** | Sell OTM Put spreads for income. Trailing stop on index futures. No direct put hedges needed. |
-| **SIDEWAYS** | Moderate volatility (VIX 13–18), choppy range-bound action | **60% Equity**<br>(40% Liquid Cash) | **NIFTY Bank (40%)**<br>**NIFTY Auto (40%)**<br>**NIFTY Energy (20%)** | Deploy Iron Condors or Short Strangles. Rebalance toward high dividend yield and quality cash flows. |
-| **HIGH-VOL** | Volatility spike (VIX 20–35+), sharp drawdown, liquidity shocks | **20% Equity**<br>(80% Liquid / Overnight) | **NIFTY IT (40%)**<br>**NIFTY Pharma (40%)**<br>**NIFTY Auto (20%)** | Buy long index Puts (50–60 delta). Exit high-beta midcaps. Hold sovereign Treasury bills. |
-| **BEAR** | Persistent negative drift, breakdown below 200 SMA, elevated VIX | **0% Equity**<br>(100% Cash / Arbitrage) | **NIFTY Bank (27%)**<br>**NIFTY Energy (27%)**<br>**NIFTY IT (19%)** | Short NIFTY futures or stay 100% in cash / overnight funds. Accumulate dry powder for capitulation bottom. |
+| Market Regime | Optimal Portfolio Allocation | Key Sector Champions | Hedging & Tactical Mandate |
+|---|---|---|---|
+| **Bull** | **Realty (40%), Metal (36%), Bank (24%)** | DLF, Tata Steel, HDFC Bank, ICICI Bank | Maximize high-beta cyclical exposure; compound with momentum |
+| **Bear** | **Bank (27%), Energy (27%), IT (19%)** | Reliance, SBI, Infosys, NTPC | Rotate into dividend cash-flow generators and defensive stalwarts |
+| **HighVol** | **IT (40%), Pharma (40%), Auto (20%)** | TCS, Sun Pharma, Dr. Reddy's, M&M | Capital preservation; USD exporters and domestic healthcare hedges |
+| **Sideways** | **Bank (40%), Auto (40%), Energy (20%)** | Kotak Bank, Maruti, PowerGrid | Value & mean-reversion plays; collect dividends in range-bound market |
 
 ---
 
-## License & Attribution
-
-Developed for institutional quantitative research and risk management in Indian equities.
-Data sources: **National Stock Exchange of India (NSE)** via Yahoo Finance, and **Federal Reserve Bank of St. Louis (FRED)**.
-Code released under the **MIT License**.
+*Authored for institutional quantitative research and production algorithmic execution.*
