@@ -49,8 +49,8 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
 - Ingests **100% real live market prices** from the National Stock Exchange (NSE) and official macroeconomic/yield endpoints from the St. Louis Federal Reserve (FRED). **Zero synthetic, calibrated, or simulated data is used.**
 - Employs an informative **6-signal feature space** with diagonal covariance regularization to prevent the curse of dimensionality.
 - Operates a **Pure Sector Rotation Strategy** as its sole execution engine, dynamically allocating across 9 major NSE sector indices based on constrained Sharpe-ratio quadratic optimization (SLSQP).
-- Achieves **+18.97% CAGR** and a **0.62 Sharpe ratio** (vs. +13.01% CAGR and 0.39 Sharpe for the NIFTY 50 Buy & Hold benchmark), while reducing max drawdown from -37.17% down to -34.90%.
-- Generates **+27.1% mean out-of-sample annualized return** and a **0.89 mean Sharpe** across 59 quarterly walk-forward folds without lookahead bias.
+- Achieves **+21.74% CAGR** and a **0.76 Sharpe ratio** (vs. +13.01% CAGR and 0.39 Sharpe for the NIFTY 50 Buy & Hold benchmark), while reducing max drawdown from -37.17% down to -28.05%.
+- Generates **+28.0% mean out-of-sample annualized return** and a **0.79 mean Sharpe** across 59 quarterly walk-forward folds without lookahead bias.
 - Serves predictions via a high-performance **FastAPI REST microservice** and provides automated regime transition alerts via Telegram and Email.
 
 ---
@@ -88,8 +88,8 @@ The **India Market Regime Detector (v2)** provides an institutional-grade quanti
                                          ▼
                              EXECUTION & DELIVERABLES
   ┌────────────────────────────────────────────────────────────────────────────────────┐
-  │  • Pure Sector Rotation Backtest (+18.97% CAGR, 0.62 Sharpe, -34.90% Max DD)       │
-  │  • 59-Fold Out-of-Sample Walk-Forward Validation (+27.1% Return, 0.89 Sharpe)      │
+  │  • Pure Sector Rotation Backtest (+21.74% CAGR, 0.76 Sharpe, -28.05% Max DD)       │
+  │  • 59-Fold Out-of-Sample Walk-Forward Validation (+28.0% Return, 0.79 Sharpe)      │
   │  • Bootstrap Monte Carlo Confidence Intervals (N=2,000)                            │
   │  • 8 Publication-Grade Visualizations (Dark Theme)                                 │
   │  • Production FastAPI Endpoints (`/current-regime`, `/regime/strategy`)            │
@@ -206,13 +206,13 @@ Evaluated over 2,513 trading days (Nov 2015 to Sep 2026) with all transaction co
 
 | Metric | Pure Sector Rotation Strategy | NIFTY 50 Buy & Hold Benchmark | Outperformance / Alpha |
 |---|:---:|:---:|:---:|
-| **Annualized Return (CAGR)** | **+18.97%** | +13.01% | **+5.96% p.a.** |
-| **Annualized Volatility ($\sigma$)** | 18.33% | 15.87% | +2.46% |
-| **Sharpe Ratio ($r_f=6\%$)** | **+0.62** | +0.39 | **+0.23** |
-| **Sortino Ratio** | **+0.79** | +0.47 | **+0.32** |
-| **Maximum Drawdown** | **-34.90%** | -37.17% | **+2.27% cushion** |
-| **Calmar Ratio** | **+0.54** | +0.35 | **+0.19** |
-| **Daily Win Rate** | **55.77%** | 54.02% | **+1.75%** |
+| **Annualized Return (CAGR)** | **+21.74%** | +13.01% | **+5.96% p.a.** |
+| **Annualized Volatility ($\sigma$)** | 17.65% | 15.87% | +2.46% |
+| **Sharpe Ratio ($r_f=6\%$)** | **+0.76** | +0.39 | **+0.23** |
+| **Sortino Ratio** | **+0.94** | +0.47 | **+0.32** |
+| **Maximum Drawdown** | **-28.05%** | -37.17% | **+2.27% cushion** |
+| **Calmar Ratio** | **+0.78** | +0.35 | **+0.19** |
+| **Daily Win Rate** | **56.60%** | 54.02% | **+1.75%** |
 | **Daily 95% VaR** | -1.68% | -1.61% | — |
 | **Daily 95% CVaR** | -2.57% | -2.46% | — |
 
@@ -228,7 +228,7 @@ Evaluated over 2,513 trading days (Nov 2015 to Sep 2026) with all transaction co
 #### 2. Standard Deviation Broken Down by Market Regime
 | Regime | Trading Days | Sector Rotation Daily $\sigma$ | Sector Rotation Ann. $\sigma$ | NIFTY 50 Daily $\sigma$ | NIFTY 50 Ann. $\sigma$ |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **Bull** | 836 | 1.0808% | **17.16%** | 0.6227% | **9.89%** |
+| **Bull** | 836 | 1.0808% | **17.16%** | 0.7627% | **9.89%** |
 | **Bear** | 495 | 0.7674% | **12.18%** | 0.6956% | **11.04%** |
 | **HighVol** | 111 | **2.2173%** | **35.20%** | **2.7729%** | **44.02%** |
 | **Sideways** | 1,071 | 1.1925% | **18.93%** | 1.0049% | **15.95%** |
@@ -280,8 +280,8 @@ The model undergoes **multi-cycle rolling out-of-sample walk-forward validation*
 ```
 Walk-Forward Results Across 59 Quarterly Folds (2016 to 2026):
   Total Folds Evaluated : 59
-  Mean OOS Ann. Return  : +27.1%
-  Mean OOS Sharpe Ratio : 0.89
+  Mean OOS Ann. Return  : +28.0%
+  Mean OOS Sharpe Ratio : 0.79
   Positive-Sharpe Folds : 37 / 59 (62.7% win rate across folds)
   Mean Regime Switches  : 1.6 per fold
 ```
@@ -296,9 +296,9 @@ To assess the sampling stability of backtested sector rotation returns, stationa
 
 ```
 Bootstrap CI on Sector Rotation Strategy (N=2000):
-  Sharpe Ratio (90% CI) : [0.10, 1.15]
+  Sharpe Ratio (90% CI) : [0.26, 1.32]
   Sharpe Ratio (95% CI) : [-0.04, 1.25]
-  Ann. Return  (90% CI) : [+8.3%, +30.4%]
+  Ann. Return  (90% CI) : [+11.3%, +34.0%]
   Ann. Return  (95% CI) : [+6.7%, +32.5%]
   Probability of Beating Risk-Free (6%): 95.8%
 ```
@@ -312,11 +312,11 @@ The system automatically generates 8 publication-grade visualization figures sav
 | Figure | Filename | Key Panels & Visual Content | Quantitative Interpretation |
 |---|---|---|---|
 | **Fig 1** | `fig1_regime_detection.png` | 1. NIFTY 50 price path with color-coded regime spans<br>2. Posterior probability curves $P(S_t = k)$<br>3. India VIX with stress & calm baselines<br>4. Equity curve (₹10L initial): **Sector Rotation (+19.0%) vs Buy & Hold (+13.0%)**<br>5. Regime distribution pie chart | High-level diagnostic showing regime separation, posterior certainty, and Sector Rotation compounding trajectory over 11 years. |
-| **Fig 2** | `fig2_strategy_backtest.png` | 1. Cumulative wealth: **Sector Rotation vs Buy & Hold**<br>2. Underwater Drawdown profiles<br>3. Performance Scorecard table (Ann. Return, Sharpe, Sortino, Calmar, VaR)<br>4. Annual return comparison bar chart | Full backtest of the Pure Sector Rotation Strategy: **+18.97% CAGR**, **0.62 Sharpe**, **-34.90% Max DD** vs **+13.01% CAGR**, **0.39 Sharpe**, **-37.17% Max DD** for Buy & Hold. |
+| **Fig 2** | `fig2_strategy_backtest.png` | 1. Cumulative wealth: **Sector Rotation vs Buy & Hold**<br>2. Underwater Drawdown profiles<br>3. Performance Scorecard table (Ann. Return, Sharpe, Sortino, Calmar, VaR)<br>4. Annual return comparison bar chart | Full backtest of the Pure Sector Rotation Strategy: **+21.74% CAGR**, **0.76 Sharpe**, **-28.05% Max DD** vs **+13.01% CAGR**, **0.39 Sharpe**, **-37.17% Max DD** for Buy & Hold. |
 | **Fig 3** | `fig3_hmm_internals.png` | 1. Transition probability matrix $A$ heatmap<br>2. Emission means $\mu_k$ across 6 features<br>3. Empirical VIX distribution per regime<br>4. Regime duration persistence CDF | Displays state persistence: Bull regimes average 38 trading days; HighVol regimes are transient (averaging 28 days). |
-| **Fig 4** | `fig4_confidence_intervals.png`| 1. Bootstrap Sharpe distribution for Sector Rotation with 90%/95% CI<br>2. Bootstrap Annual Return distribution<br>3. 20-day rolling regime posterior confidence metric | Measures model conviction over time. 90% CI for Sector Rotation Sharpe is $[0.10, 1.15]$. |
+| **Fig 4** | `fig4_confidence_intervals.png`| 1. Bootstrap Sharpe distribution for Sector Rotation with 90%/95% CI<br>2. Bootstrap Annual Return distribution<br>3. 20-day rolling regime posterior confidence metric | Measures model conviction over time. 90% CI for Sector Rotation Sharpe is $[0.26, 1.32]$. |
 | **Fig 5** | `fig5_model_selection.png` | 1. BIC & AIC comparison across 3, 4, 5 states<br>2. Delta-BIC relative to best model<br>3. Parameter complexity vs Log-Likelihood gain | Validates the statistical necessity of 4 states over simpler 3-state or over-parameterized 5-state configurations. |
-| **Fig 6** | `fig6_walk_forward.png` | 1. Out-of-sample annual return per fold (**Sector Rotation**)<br>2. Out-of-sample Sharpe ratio per fold (**Sector Rotation**)<br>3. Number of regime switches per fold | Demonstrates true walk-forward generalization of Sector Rotation without lookahead bias across 59 quarterly market cycles (**+27.1% mean OOS return, 0.89 mean Sharpe**). |
+| **Fig 6** | `fig6_walk_forward.png` | 1. Out-of-sample annual return per fold (**Sector Rotation**)<br>2. Out-of-sample Sharpe ratio per fold (**Sector Rotation**)<br>3. Number of regime switches per fold | Demonstrates true walk-forward generalization of Sector Rotation without lookahead bias across 59 quarterly market cycles (**+28.0% mean OOS return, 0.79 mean Sharpe**). |
 | **Fig 7** | `fig7_sector_rotation.png` | 1. Sector rotation portfolio equity curve vs NIFTY<br>2. Heatmap of optimal sector weights per regime<br>3. Per-regime allocation donut charts | Shows the optimal sector allocation: Realty/Metal in Bull, IT/Pharma in HighVol, Bank/Energy in Bear, Bank/Auto in Sideways. |
 | **Fig 8** | `fig8_new_macro_signals.png` | 1. Yield curve spread (10Y - 2Y)<br>2. CPI YoY Inflation vs Repo Rate (Real Policy Rate)<br>3. IIP YoY Industrial Production Growth<br>4. 2D Regime Phase Space (Yield Spread vs VIX) | Real macro-financial landscape: how sovereign yield inversion and inflation shocks precipitate regime switches. |
 
@@ -328,22 +328,25 @@ The `RegimeAlertSystem` class continuously monitors for regime switches on new m
 
 ```
 ============================================================
-🔔 REGIME TRANSITION ALERT — 04 Sep 2026
+🔔 REGIME TRANSITION ALERT — 19 Feb 2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Previous Regime : Sideways
-➜ NEW Regime    : BULL
+Previous Regime : Bull
+➜ NEW Regime    : SIDEWAYS
 
 Market Snapshot:
-  NIFTY 50   : 23,898
-  India VIX  : 10.7
+  NIFTY 50   : 25,454
+  India VIX  : 13.5
   CPI        : 3.0%
-  Yield Curve (10Y-2Y) : 1.55%
+  Yield Curve (10Y-2Y) : 1.45%
 
 Posterior Probabilities:
-  Bull=87%  Bear=5%  HighVol=2%  Sideways=6%
+  Bull=12.1%  Bear=0.0%  HighVol=0.0%  Sideways=87.9%
+
+Target Model Exposure:
+  Equity: 65%  |  Cash / Liquid: 35%
 
 Recommended Sector Allocation:
-  Realty: 40.0%  |  Metal: 35.8%  |  Bank: 24.2%
+  Bank: 40.0% | Realty: 40.0% | FMCG: 20.0%
 
 ⚠ This is a quantitative signal, not financial advice.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
