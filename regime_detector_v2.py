@@ -276,15 +276,20 @@ def engineer_features(df):
 
 def select_features_for_hmm(feat, n_states=4):
     """
-    Parsimonious 6-feature set optimized for OOS generalization.
+    Economic & Market Regime Feature Set (Daily Market Data + Real Live Economic Indicators).
+    RSI-14 is removed as requested; macroeconomic indicators (Yield Curve, CPI, IIP, Real Rate)
+    are selected alongside core market signals.
     """
     cols = [
-        'ret_1d',           # daily return — core regime signal
-        'vol_20d',          # 20-day realized vol — separates calm vs turbulent
-        'price_vs_ma200',   # trend position — separates bull vs bear
-        'rsi14',            # momentum exhaustion — overbought/oversold
-        'vix',              # fear gauge — direct regime discriminator
+        'ret_1d',           # daily return — core market price signal
+        'vol_20d',          # 20-day realized vol — separates calm vs turbulent volatility
+        'price_vs_ma200',   # trend position — structural bull vs bear cycle
+        'vix',              # fear gauge — market volatility environment
         'drawdown',         # distance from peak — crash detector
+        'yield_curve',      # economic indicator: 10Y - 2Y sovereign yield curve spread
+        'cpi_yoy',          # economic indicator: Consumer Price Index YoY inflation
+        'iip_yoy',          # economic indicator: Index of Industrial Production YoY
+        'real_rate',        # economic indicator: Real policy rate (Repo Rate - CPI)
     ]
     return feat[cols]
 
@@ -503,10 +508,10 @@ def label_regimes(model, X_scaled, feat, df):
             state_centroids[s] = X_orig[mask].mean(axis=0)
 
     regime_priors = {
-        'Bull':     np.array([ 0.0008, 0.12,  0.08, 60,  14, -0.02]),
-        'Bear':     np.array([-0.0005, 0.18, -0.05, 40,  22, -0.15]),
-        'HighVol':  np.array([-0.001,  0.35, -0.10, 38,  35, -0.25]),
-        'Sideways': np.array([ 0.0002, 0.13,  0.02, 50,  16, -0.05]),
+        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 1.70]),
+        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.30]),
+        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 0.00]),
+        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 0.85]),
     }
 
     all_centroids = np.array(list(state_centroids.values()))
@@ -603,6 +608,7 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
     - Regime smoothing
     - Realistic return logic
     - Filtering of partial end-stubs (<25 days) to eliminate annualization noise
+
     """
     print("\n╔════════════════════════════════════════════════╗")
     print("║  WALK-FORWARD VALIDATION (no look-ahead bias) ║")
@@ -633,10 +639,10 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
     folds      = []
 
     regime_priors = {
-        'Bull':     np.array([ 0.0008, 0.12,  0.08, 60,  14, -0.02]),
-        'Bear':     np.array([-0.0005, 0.18, -0.05, 40,  22, -0.15]),
-        'HighVol':  np.array([-0.001,  0.35, -0.10, 38,  35, -0.25]),
-        'Sideways': np.array([ 0.0002, 0.13,  0.02, 50,  16, -0.05]),
+        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 1.70]),
+        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.30]),
+        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 0.00]),
+        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 0.85]),
     }
 
     all_oos_daily = []  # Collect (date, daily_return) for chained equity curve
@@ -960,7 +966,8 @@ class RegimeAlertSystem:
     """
     Detects regime transitions and formats quantitative alert reports.
     """
-    def __init__(self, email_config=None, telegram_token=None, telegram_chat_id=None):
+    def __init__(self, learned_sector_mix=None, email_config=None, telegram_token=None, telegram_chat_id=None):
+        self.learned_sector_mix = learned_sector_mix or {}
         self.email_config = email_config
         self.telegram_token = telegram_token
         self.telegram_chat_id = telegram_chat_id
@@ -1011,6 +1018,13 @@ class RegimeAlertSystem:
         ) * 100))
         cash_exp = max(0, 100 - eq_exp)
 
+        sector_str = ""
+        if self.learned_sector_mix and new_regime in self.learned_sector_mix:
+            top_s = sorted(self.learned_sector_mix[new_regime].items(), key=lambda x: x[1], reverse=True)
+            top_parts = [f"{s.replace('NIFTY ', '')}: {w*100:.1f}%" for s, w in top_s if w > 0.01]
+            if top_parts:
+                sector_str = "\nRecommended Sector Allocation:\n  " + " | ".join(top_parts) + "\n"
+
         msg = f"""
 🔔 REGIME TRANSITION ALERT — {date_str}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1024,11 +1038,11 @@ Market Snapshot:
   Yield Curve (10Y-2Y) : {yc:.2f}%
 
 Posterior Probabilities:
-  Bull={bull_p:.0f}%  Bear={bear_p:.0f}%  HighVol={hv_p:.0f}%  Sideways={sw_p:.0f}%
+  Bull={bull_p:.1f}%  Bear={bear_p:.1f}%  HighVol={hv_p:.1f}%  Sideways={sw_p:.1f}%
 
 Target Model Exposure:
   Equity: {eq_exp}%  |  Cash / Liquid: {cash_exp}%
-
+{sector_str}
 ⚠ This is a quantitative signal, not financial advice.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
         return msg.strip()
@@ -1860,9 +1874,12 @@ class MarketFeatures(BaseModel):
     ret_1d:         float = Field(..., description="1-day return")
     vol_20d:        float = Field(..., description="20-day annualized realized volatility")
     price_vs_ma200: float = Field(..., description="Distance from 200-day moving average")
-    rsi14:          float = Field(..., description="14-day RSI (0-100)")
     vix:            float = Field(..., description="India VIX level")
     drawdown:       float = Field(..., description="Drawdown from all-time peak (negative)")
+    yield_curve:    float = Field(..., description="10Y - 2Y sovereign yield curve spread (%)")
+    cpi_yoy:        float = Field(..., description="Consumer Price Index YoY inflation (%)")
+    iip_yoy:        float = Field(..., description="Index of Industrial Production YoY growth (%)")
+    real_rate:      float = Field(..., description="Real policy rate: Repo Rate - CPI (%)")
 
 REGIME_EXPOSURE = {
     "Bull":     1.0,
@@ -1888,9 +1905,12 @@ def predict_regime(features: MarketFeatures):
         features.ret_1d,
         features.vol_20d,
         features.price_vs_ma200,
-        features.rsi14,
         features.vix,
         features.drawdown,
+        features.yield_curve,
+        features.cpi_yoy,
+        features.iip_yoy,
+        features.real_rate,
     ]])
 
     scaled = _scaler.transform(raw)
@@ -1926,6 +1946,33 @@ def regime_strategy(regime: str):
         "cash_exposure": round(1.0 - eq, 2),
         "sector_mix": _learned_sector_mix.get(regime, {})
     }
+
+@app.get("/regime/current")
+def current_regime():
+    csv_path = os.path.join(ARTIFACT_DIR, "regime_history_v2.csv")
+    if not os.path.exists(csv_path):
+        raise HTTPException(503, "Regime history data not available.")
+    df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+    latest = df.iloc[-1]
+    curr_reg = latest["Regime"]
+    probs = {
+        "Bull": round(float(latest.get("Bull", 0.0)), 4),
+        "Bear": round(float(latest.get("Bear", 0.0)), 4),
+        "HighVol": round(float(latest.get("HighVol", 0.0)), 4),
+        "Sideways": round(float(latest.get("Sideways", 0.0)), 4),
+    }
+    exp = sum(probs.get(r, 0.0) * REGIME_EXPOSURE.get(r, 0.5) for r in probs)
+    return {
+        "date": str(latest.name)[:10],
+        "regime": curr_reg,
+        "nifty": float(latest.get("NIFTY", 0)),
+        "vix": float(latest.get("VIX", 0)),
+        "cpi": float(latest.get("CPI", 0)),
+        "yield_curve": float(latest.get("YieldCurve", 0)),
+        "posteriors": probs,
+        "market_exposure": round(exp, 4),
+        "recommended_sector_mix": _learned_sector_mix.get(curr_reg, {}),
+    }
 '''
 
 
@@ -1960,7 +2007,7 @@ def main():
     df = fetch_live_market_data(start_date="2015-01-01")
 
     # ── 2. Feature engineering ───────────────────────────────────────
-    print("\n[2] Feature engineering (6 core HMM signals + macro features)...")
+    print("\n[2] Feature engineering (Daily market signals + economic indicators, RSI-14 removed)...")
     feat = engineer_features(df)
 
     # ── 3. Model selection (BIC / AIC) ───────────────────────────────
@@ -2018,17 +2065,31 @@ def main():
     print("\n[9] Bootstrap confidence intervals on Sector Rotation Strategy (N=2000)...")
     ci_results = bootstrap_confidence_intervals(strat_ret)
 
-    # ── 10. Alert system demo ─────────────────────────────────────────
-    print("\n[10] Alert system demonstration...")
-    alerter = RegimeAlertSystem()
-    alerter._last_regime = 'Sideways'
-    demo_df = result.copy()
-    demo_df.loc[demo_df.index[-1], 'Regime'] = 'Bull'
-    demo_df.loc[demo_df.index[-1], 'Bull'] = 0.87
-    demo_df.loc[demo_df.index[-1], 'Bear'] = 0.05
-    demo_df.loc[demo_df.index[-1], 'HighVol'] = 0.02
-    demo_df.loc[demo_df.index[-1], 'Sideways'] = 0.06
-    alerter.check_and_alert(demo_df)
+    # ── 10. Live Alert System (100% Real Live Model Posteriors) ───────
+    print("\n[10] Live alert system (100% real live model posteriors)...")
+    alerter = RegimeAlertSystem(learned_sector_mix=learned_sector_mix)
+
+    # Trigger alert on the most recent real regime transition in the dataset
+    regime_changes = result.index[result['Regime'] != result['Regime'].shift(1)]
+    if len(regime_changes) > 1:
+        last_transition_date = regime_changes[-1]
+        prev_date = result.index[result.index < last_transition_date][-1]
+        prev_regime = result.loc[prev_date, 'Regime']
+        alerter._last_regime = prev_regime
+        alerter.check_and_alert(result.loc[:last_transition_date])
+    else:
+        alerter.check_and_alert(result)
+
+    # Current live status on the latest available trading day
+    latest_row = result.iloc[-1]
+    curr_reg = latest_row['Regime']
+    bull_p = latest_row.get('Bull', 0) * 100
+    bear_p = latest_row.get('Bear', 0) * 100
+    hv_p   = latest_row.get('HighVol', 0) * 100
+    sw_p   = latest_row.get('Sideways', 0) * 100
+    print(f"\n[Current Market Status — {latest_row.name.strftime('%d %b %Y')}]")
+    print(f"  Active Regime   : {curr_reg}")
+    print(f"  Real Posteriors : Bull={bull_p:.1f}% | Bear={bear_p:.1f}% | HighVol={hv_p:.1f}% | Sideways={sw_p:.1f}%")
 
     # ── Save model artifacts for REST API ────────────────────────────
     os.makedirs(OUT_DIR, exist_ok=True)
