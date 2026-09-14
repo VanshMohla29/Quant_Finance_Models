@@ -33,6 +33,25 @@ from scipy import stats
 from scipy.optimize import minimize
 import yfinance as yf
 
+# ── Environment & Secret Configuration ──────────────────────────────
+def _load_env_file(filepath=None):
+    """Loads environment variables from local .env file."""
+    if filepath is None:
+        filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(filepath):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(filepath)
+        except ImportError:
+            with open(filepath, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+_load_env_file()
+
 # ══════════════════════════════════════════════════════════════════════
 # CONSTANTS & CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════
@@ -78,45 +97,118 @@ def fetch_india_macro_fred():
     - Industrial Production Index IIP YoY (INDPRMNTO01GYSAM)
     - Central Bank / Call Money Rate (IRSTCI01INM156N)
     No synthetic, calibrated, or simulated data is used.
+    Each series is fetched with individual resilience so a temporary hiccup in one
+    feed will not prevent other live indicators from updating.
     """
+    urls = {
+        'CPI':       'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDCPIALLMINMEI',
+        'IIP':       'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDPRMNTO01GYSAM',
+        'Rate':      'https://fred.stlouisfed.org/graph/fredgraph.csv?id=IRSTCI01INM156N',
+        'GSec10Y':   'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIRLTLT01STM',
+        'GSecShort': 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIR3TIB01STM',
+    }
+    series_dict = {}
+    for key, url in urls.items():
+        try:
+            d = pd.read_csv(url, index_col=0, parse_dates=True)
+            s = pd.to_numeric(d.iloc[:, 0], errors='coerce').dropna()
+            if key == 'CPI':
+                s = (s.pct_change(12) * 100).dropna()
+            series_dict[key] = s
+        except Exception as e:
+            print(f"  [warn] FRED {key} fetch failed ({e})")
+
+    if not series_dict:
+        print("[warn] All FRED Macro Fetches failed — using latest published official baselines")
+        return None
+
     try:
-        urls = {
-            'CPI':       'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDCPIALLMINMEI',
-            'IIP':       'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDPRMNTO01GYSAM',
-            'Rate':      'https://fred.stlouisfed.org/graph/fredgraph.csv?id=IRSTCI01INM156N',
-            'GSec10Y':   'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIRLTLT01STM',
-            'GSecShort': 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=INDIR3TIB01STM',
-        }
-        d_cpi = pd.read_csv(urls['CPI'], index_col=0, parse_dates=True)
-        cpi_raw = pd.to_numeric(d_cpi.iloc[:, 0], errors='coerce').dropna()
-        cpi_yoy = (cpi_raw.pct_change(12) * 100).dropna()
-
-        d_iip = pd.read_csv(urls['IIP'], index_col=0, parse_dates=True)
-        iip_yoy = pd.to_numeric(d_iip.iloc[:, 0], errors='coerce').dropna()
-
-        d_rate = pd.read_csv(urls['Rate'], index_col=0, parse_dates=True)
-        rate = pd.to_numeric(d_rate.iloc[:, 0], errors='coerce').dropna()
-
-        d_10y = pd.read_csv(urls['GSec10Y'], index_col=0, parse_dates=True)
-        gsec10 = pd.to_numeric(d_10y.iloc[:, 0], errors='coerce').dropna()
-
-        d_short = pd.read_csv(urls['GSecShort'], index_col=0, parse_dates=True)
-        gsec_short = pd.to_numeric(d_short.iloc[:, 0], errors='coerce').dropna()
-
         df_m = pd.DataFrame({
-            'CPI_YoY': cpi_yoy,
-            'IIP_YoY': iip_yoy,
-            'RepoRate': rate,
-            'GSecYield10': gsec10,
-            'GSecYield2': gsec_short,
+            'CPI_YoY':     series_dict.get('CPI'),
+            'IIP_YoY':     series_dict.get('IIP'),
+            'RepoRate':    series_dict.get('Rate'),
+            'GSecYield10': series_dict.get('GSec10Y'),
+            'GSecYield2':  series_dict.get('GSecShort'),
         })
         df_m = df_m.ffill().bfill()
         df_m['YieldCurve'] = df_m['GSecYield10'] - df_m['GSecYield2']
         return df_m
     except Exception as e:
-        print(f"[warn] FRED Macro Fetch failed ({e}) — using latest published official baselines")
+        print(f"[warn] FRED Macro assembly failed ({e}) — using baselines")
         return None
 
+
+def fetch_india_wpi():
+    """
+    Fetches official India Wholesale Price Index (WPI) — All Commodities (Base 2011-12=100)
+    directly from the Office of the Economic Adviser, DPIIT, GoI (eaindustry.nic.in).
+    Computes Year-over-Year percentage change to produce a stationary WPI inflation series.
+    No synthetic, calibrated, or simulated data is used.
+
+    Auto-discovers the latest available monthly file by trying the current month first
+    and walking backwards up to 12 months. The government publishes files with the naming
+    convention: monthly_index_YYYYMM.xls (e.g., monthly_index_202606.xls for June 2026).
+    This ensures that when a new monthly file is released by the government, the system
+    picks it up automatically without needing any manual code or URL updates.
+    """
+    import io, urllib.request
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+
+    base_url = 'https://eaindustry.nic.in/indx_download_1112/monthly_index_{}.xls'
+    now = datetime.now()
+    data = None
+    fetched_label = None
+
+    # Try current month, then walk back up to 12 months to discover latest published file
+    for months_back in range(13):
+        target = now - relativedelta(months=months_back)
+        label = target.strftime('%Y%m')
+        url = base_url.format(label)
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content = resp.read()
+                if len(content) > 2000:  # valid binary XLS file (not a 404 HTML error page)
+                    data = content
+                    fetched_label = label
+                    break
+        except Exception:
+            continue
+
+    if data is None:
+        print("  [warn] WPI: Could not find any recent file on eaindustry.nic.in — using fallback value")
+        return None
+
+    try:
+        df_xls = pd.read_excel(io.BytesIO(data), sheet_name=0, header=None, engine='xlrd')
+
+        header_row = df_xls.iloc[0]
+        all_comm_row = df_xls.iloc[1]
+
+        dates, values = [], []
+        for c in range(3, df_xls.shape[1]):
+            col_name = str(header_row[c])
+            if col_name.upper().startswith('INDX'):
+                month = int(col_name[4:6])
+                year = int(col_name[6:])
+                dt = pd.Timestamp(year=year, month=month, day=1)
+                val = pd.to_numeric(all_comm_row[c], errors='coerce')
+                if not np.isnan(val):
+                    dates.append(dt)
+                    values.append(val)
+
+        wpi_index = pd.Series(values, index=dates, name='WPI_Index').sort_index()
+        wpi_yoy = (wpi_index.pct_change(12) * 100).dropna()
+        wpi_yoy.name = 'WPI_YoY'
+
+        print(f"  ✓ WPI (Auto-Discovered): {len(wpi_yoy)} months ({wpi_yoy.index[0].strftime('%Y-%m')} → "
+              f"{wpi_yoy.index[-1].strftime('%Y-%m')}) | Latest: {wpi_yoy.iloc[-1]:.2f}% "
+              f"[source: monthly_index_{fetched_label}.xls]")
+        return wpi_yoy
+    except Exception as e:
+        print(f"  [warn] WPI parse failed ({e}) — using fallback value")
+        return None
 
 def fetch_live_market_data(start_date="2015-01-01"):
     """
@@ -164,13 +256,22 @@ def fetch_live_market_data(start_date="2015-01-01"):
         df['RepoRate']    = 6.50
         
     df['RealRate'] = df['RepoRate'] - df['CPI']
+
+    # ── Official India WPI (eaindustry.nic.in) ──
+    wpi_data = fetch_india_wpi()
+    if wpi_data is not None:
+        wpi_daily = wpi_data.reindex(df.index, method='ffill').bfill()
+        df['WPI'] = wpi_daily
+    else:
+        df['WPI'] = 2.0  # fallback: recent average WPI inflation
+
     df['FII_Flow'] = 0.0
     df['PMI']      = 58.5
     df['TrueRegime'] = 0
     
     df.dropna(subset=['NIFTY', 'Returns'], inplace=True)
     print(f"✓ Loaded {len(df)} real live trading days ({df.index[0].strftime('%Y-%m-%d')} → {df.index[-1].strftime('%Y-%m-%d')})")
-    print(f"  Latest Price: {df['NIFTY'].iloc[-1]:,.2f} | VIX: {df['VIX'].iloc[-1]:.2f} | 10Y Yield: {df['GSecYield10'].iloc[-1]:.2f}% | CPI: {df['CPI'].iloc[-1]:.2f}% | IIP: {df['IIP'].iloc[-1]:.2f}%")
+    print(f"  Latest Price: {df['NIFTY'].iloc[-1]:,.2f} | VIX: {df['VIX'].iloc[-1]:.2f} | 10Y Yield: {df['GSecYield10'].iloc[-1]:.2f}% | CPI: {df['CPI'].iloc[-1]:.2f}% | IIP: {df['IIP'].iloc[-1]:.2f}% | WPI: {df['WPI'].iloc[-1]:.2f}%")
     return df
 
 
@@ -258,12 +359,14 @@ def engineer_features(df):
     feat['rate_spread'] = df['GSecYield10'] - df['RepoRate']
     feat['cpi_yoy']     = df['CPI']
     feat['iip_yoy']     = df['IIP']
+    feat['wpi_yoy']     = df['WPI']
     feat['real_rate']   = df['RealRate']
     feat['dxy_ret_5']   = df['DXY'].pct_change(5)
 
     # 10. Macro composite signal
     feat['macro_stress'] = (
         (feat['cpi_yoy'] > 6.0).astype(int) +
+        (feat['wpi_yoy'] > 8.0).astype(int) +       # WPI > 8% indicates wholesale price pressure
         (feat['yield_curve'] < 0.0).astype(int) * 2 +
         (feat['real_rate'] < 0.0).astype(int) +
         (feat['vix'] > 22.0).astype(int)
@@ -277,7 +380,7 @@ def engineer_features(df):
 def select_features_for_hmm(feat, n_states=4):
     """
     Economic & Market Regime Feature Set (Daily Market Data + Real Live Economic Indicators).
-    RSI-14 is removed as requested; macroeconomic indicators (Yield Curve, CPI, IIP, Real Rate)
+    RSI-14 is removed as requested; macroeconomic indicators (Yield Curve, CPI, IIP, WPI, Real Rate)
     are selected alongside core market signals.
     """
     cols = [
@@ -289,6 +392,7 @@ def select_features_for_hmm(feat, n_states=4):
         'yield_curve',      # economic indicator: 10Y - 2Y sovereign yield curve spread
         'cpi_yoy',          # economic indicator: Consumer Price Index YoY inflation
         'iip_yoy',          # economic indicator: Index of Industrial Production YoY
+        'wpi_yoy',          # economic indicator: Wholesale Price Index YoY (eaindustry.nic.in)
         'real_rate',        # economic indicator: Real policy rate (Repo Rate - CPI)
     ]
     return feat[cols]
@@ -587,10 +691,11 @@ def label_regimes(model, X_scaled, feat, df):
             state_centroids[s] = X_orig[mask].mean(axis=0)
 
     regime_priors = {
-        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 1.70]),
-        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.30]),
-        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 0.00]),
-        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 0.85]),
+        # Features: ret_1d, vol_20d, price_vs_ma200, vix, drawdown, yield_curve, cpi_yoy, iip_yoy, wpi_yoy, real_rate
+        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 3.50, 1.70]),
+        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.50, 1.30]),
+        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 12.0, 0.00]),
+        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 2.50, 0.85]),
     }
 
     all_centroids = np.array(list(state_centroids.values()))
@@ -660,9 +765,11 @@ def label_regimes(model, X_scaled, feat, df):
         'Returns':     df.loc[feat.index, 'Returns'],
         'VIX':         df.loc[feat.index, 'VIX'],
         'RepoRate':    df.loc[feat.index, 'RepoRate'],
+        'GSecYield10': df.loc[feat.index, 'GSecYield10'],
         'YieldCurve':  df.loc[feat.index, 'YieldCurve'],
         'CPI':         df.loc[feat.index, 'CPI'],
         'IIP':         df.loc[feat.index, 'IIP'],
+        'WPI':         df.loc[feat.index, 'WPI'],
         'HMM_State':   states,
         'Regime':      decoded_labels,
         'RegimeColor': decoded_colors,
@@ -718,10 +825,11 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
     folds      = []
 
     regime_priors = {
-        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 1.70]),
-        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.30]),
-        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 0.00]),
-        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 0.85]),
+        # Features: ret_1d, vol_20d, price_vs_ma200, vix, drawdown, yield_curve, cpi_yoy, iip_yoy, wpi_yoy, real_rate
+        'Bull':     np.array([ 0.0008, 0.12,  0.08, 13.0, -0.02, 0.90, 4.50,   5.00, 3.50, 1.70]),
+        'Bear':     np.array([-0.0005, 0.18, -0.05, 15.0, -0.15, 1.30, 4.50,   5.00, 1.50, 1.30]),
+        'HighVol':  np.array([-0.0010, 0.35, -0.10, 35.0, -0.25, 2.20, 5.20, -15.00, 12.0, 0.00]),
+        'Sideways': np.array([ 0.0002, 0.13,  0.02, 17.0, -0.05, 1.45, 5.00,   6.50, 2.50, 0.85]),
     }
 
     all_oos_daily = []  # Collect (date, daily_return) for chained equity curve
@@ -811,15 +919,20 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
             sharpe = 0.0
         n_switches = sum(1 for i in range(1, len(oos_labels)) if oos_labels[i] != oos_labels[i-1])
 
+        gains_fold = tc_returns[tc_returns > 0].sum()
+        losses_fold = abs(tc_returns[tc_returns < 0].sum())
+        pf_fold = float(gains_fold / (losses_fold + 1e-8)) if losses_fold > 0 else (99.0 if gains_fold > 0 else 1.0)
+
         folds.append({
-            'fold_start':  fold_start.strftime('%Y-%m'),
-            'fold_end':    fold_end.strftime('%Y-%m'),
-            'n_train':     train_mask.sum(),
-            'n_test':      test_mask.sum(),
-            'ann_ret_pct': ann_ret,
-            'sharpe':      sharpe,
-            'n_switches':  n_switches,
-            'regime_dist': pd.Series(oos_labels).value_counts().to_dict(),
+            'fold_start':    fold_start.strftime('%Y-%m'),
+            'fold_end':      fold_end.strftime('%Y-%m'),
+            'n_train':       train_mask.sum(),
+            'n_test':        test_mask.sum(),
+            'ann_ret_pct':   ann_ret,
+            'sharpe':        sharpe,
+            'profit_factor': round(pf_fold, 2),
+            'n_switches':    n_switches,
+            'regime_dist':   pd.Series(oos_labels).value_counts().to_dict(),
         })
 
         # Store daily OOS returns with their dates for chained equity curve
@@ -837,6 +950,7 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
         print(f"\n  Walk-Forward Summary ({len(folds_df)} folds):")
         print(f"  Mean OOS Ann. Return : {folds_df['ann_ret_pct'].mean():+.1f}%")
         print(f"  Mean OOS Sharpe      : {folds_df['sharpe'].mean():.2f}")
+        print(f"  Mean OOS Profit Factor: {folds_df['profit_factor'].mean():.2f}")
         print(f"  Positive-Sharpe folds: {(folds_df['sharpe'] > 0).sum()} / {len(folds_df)}")
         print(f"  Mean regime switches : {folds_df['n_switches'].mean():.1f} per fold")
 
@@ -909,11 +1023,15 @@ def compute_performance_metrics(returns, capital, risk_free=0.06):
     max_dd     = dd.min()
     calmar     = ann_return / (abs(max_dd) + 1e-8)
     win_rate   = (returns > 0).mean()
+    gains      = returns[returns > 0].sum()
+    losses     = abs(returns[returns < 0].sum())
+    profit_factor = float(gains / (losses + 1e-8)) if losses > 0 else np.nan
     var_95     = np.percentile(returns, 5)
     cvar_95    = returns[returns <= var_95].mean()
     return dict(ann_return=ann_return, ann_vol=ann_vol, sharpe=sharpe,
                 sortino=sortino, max_dd=max_dd, calmar=calmar,
-                win_rate=win_rate, var_95=var_95, cvar_95=cvar_95)
+                win_rate=win_rate, profit_factor=profit_factor,
+                var_95=var_95, cvar_95=cvar_95)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1014,7 +1132,7 @@ def bootstrap_confidence_intervals(returns, n_bootstrap=2000, ci_levels=(0.90, 0
     ann = 252
     rf  = 0.06 / ann
     n   = len(returns)
-    boot = dict(sharpe=[], ret=[], vol=[], calmar=[])
+    boot = dict(sharpe=[], ret=[], vol=[], calmar=[], pf=[])
     for _ in range(n_bootstrap):
         idx = np.random.choice(n, n, replace=True)
         br  = returns[idx]
@@ -1024,20 +1142,26 @@ def bootstrap_confidence_intervals(returns, n_bootstrap=2000, ci_levels=(0.90, 0
         b_cap = np.exp(np.cumsum(br))
         b_dd  = ((b_cap - np.maximum.accumulate(b_cap)) / np.maximum.accumulate(b_cap)).min()
         b_cal = b_ret / (abs(b_dd) + 1e-8)
+        b_g   = br[br > 0].sum()
+        b_l   = abs(br[br < 0].sum())
+        b_pf  = b_g / (b_l + 1e-8)
         boot['sharpe'].append(b_sha); boot['ret'].append(b_ret)
         boot['vol'].append(b_vol);   boot['calmar'].append(b_cal)
+        boot['pf'].append(b_pf)
 
     ci_results = {}
     for ci in ci_levels:
         a = (1 - ci) / 2
         ci_results[ci] = {
-            'sharpe': (np.percentile(boot['sharpe'], a*100), np.percentile(boot['sharpe'], (1-a)*100)),
-            'return': (np.percentile(boot['ret'], a*100),    np.percentile(boot['ret'], (1-a)*100)),
+            'sharpe':        (np.percentile(boot['sharpe'], a*100), np.percentile(boot['sharpe'], (1-a)*100)),
+            'return':        (np.percentile(boot['ret'], a*100),    np.percentile(boot['ret'], (1-a)*100)),
+            'profit_factor': (np.percentile(boot['pf'], a*100),     np.percentile(boot['pf'], (1-a)*100)),
         }
-    ci_results['distributions'] = {'sharpe': boot['sharpe'], 'return': boot['ret'], 'ret': boot['ret']}
+    ci_results['distributions'] = {'sharpe': boot['sharpe'], 'return': boot['ret'], 'ret': boot['ret'], 'profit_factor': boot['pf']}
     print(f"✓ Bootstrap CI (N={n_bootstrap}) | "
           f"Sharpe 90%: [{ci_results[0.90]['sharpe'][0]:.2f}, {ci_results[0.90]['sharpe'][1]:.2f}]  |  "
-          f"Return 90%: [{ci_results[0.90]['return'][0]*100:.1f}%, {ci_results[0.90]['return'][1]*100:.1f}%]")
+          f"Return 90%: [{ci_results[0.90]['return'][0]*100:.1f}%, {ci_results[0.90]['return'][1]*100:.1f}%]  |  "
+          f"Profit Factor 90%: [{ci_results[0.90]['profit_factor'][0]:.2f}, {ci_results[0.90]['profit_factor'][1]:.2f}]")
     return ci_results
 
 
@@ -1047,11 +1171,21 @@ class RegimeAlertSystem:
     """
     def __init__(self, learned_sector_mix=None, email_config=None, telegram_token=None, telegram_chat_id=None):
         self.learned_sector_mix = learned_sector_mix or {}
-        self.email_config = email_config
-        self.telegram_token = telegram_token
-        self.telegram_chat_id = telegram_chat_id
+        self.email_config = email_config or self._load_email_config_from_env()
+        self.telegram_token = telegram_token or os.getenv('TELEGRAM_BOT_TOKEN')
+        self.telegram_chat_id = telegram_chat_id or os.getenv('TELEGRAM_CHAT_ID')
         self._last_regime = None
         self._alert_history = []
+
+    def _load_email_config_from_env(self):
+        user = os.getenv('SMTP_USER') or os.getenv('EMAIL_FROM')
+        pwd  = os.getenv('SMTP_PASSWORD') or os.getenv('EMAIL_PASSWORD')
+        to   = os.getenv('EMAIL_TO')
+        host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+        port = int(os.getenv('SMTP_PORT', 587))
+        if user and pwd and to:
+            return {'smtp_host': host, 'smtp_port': port, 'from': user, 'password': pwd, 'to': to}
+        return None
 
     def check_and_alert(self, result):
         latest = result.iloc[-1]
@@ -1320,6 +1454,7 @@ def plot_strategy_backtest(result, strategy_returns, strategy_capital, buy_hold_
         ['Ann. Volatility', f"{strat_m['ann_vol']*100:.2f}%",     f"{bh_m['ann_vol']*100:.2f}%"],
         ['Sharpe Ratio',    f"{strat_m['sharpe']:.2f}",           f"{bh_m['sharpe']:.2f}"],
         ['Sortino Ratio',   f"{strat_m['sortino']:.2f}",          f"{bh_m['sortino']:.2f}"],
+        ['Profit Factor',   f"{strat_m['profit_factor']:.2f}",    f"{bh_m['profit_factor']:.2f}"],
         ['Max Drawdown',    f"{strat_m['max_dd']*100:.2f}%",      f"{bh_m['max_dd']*100:.2f}%"],
         ['Calmar Ratio',    f"{strat_m['calmar']:.2f}",           f"{bh_m['calmar']:.2f}"],
         ['Win Rate',        f"{strat_m['win_rate']*100:.1f}%",    f"{bh_m['win_rate']*100:.1f}%"],
@@ -1331,8 +1466,8 @@ def plot_strategy_backtest(result, strategy_returns, strategy_capital, buy_hold_
     tbl = axes[1, 1].table(cellText=metrics_table[1:], colLabels=metrics_table[0],
                            loc='center', cellLoc='center')
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(8.5)
-    tbl.scale(1.0, 1.4)
+    tbl.set_fontsize(8.0)
+    tbl.scale(1.0, 1.3)
     for (r, c), cell in tbl.get_celld().items():
         cell.set_edgecolor('#1e1e28')
         if r == 0:
@@ -1762,14 +1897,16 @@ def plot_new_macro_signals(result, out_dir):
     ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
     ax.set_xlim(result.index[0], result.index[-1])
 
-    # 2. CPI Inflation
+    # 2. CPI & WPI Inflation
     ax = fig.add_subplot(gs8[0, 1])
     ax.set_facecolor('#0f0f11')
     shade_regimes(ax)
-    ax.plot(result.index, result['CPI'], color='#f59e0b', lw=0.8)
+    ax.plot(result.index, result['CPI'], color='#f59e0b', lw=0.9, label='CPI YoY')
+    if 'WPI' in result.columns:
+        ax.plot(result.index, result['WPI'], color='#38bdf8', lw=0.9, label='WPI YoY (GoI)')
     ax.axhline(4.0, color='#10b981', lw=0.7, ls='--', label='RBI target (4%)')
     ax.axhline(6.0, color='#ef4444', lw=0.7, ls='--', label='Upper tolerance (6%)')
-    ax.set_title('CPI Inflation (%)\nRBI target: 4% ± 2%', fontsize=9, color='#9ca3af')
+    ax.set_title('CPI & WPI Inflation (%)\nRBI target: 4% ± 2%', fontsize=9, color='#9ca3af')
     ax.set_ylabel('%', fontsize=8); ax.grid(True, lw=0.3)
     ax.legend(fontsize=7, framealpha=0.3, facecolor='#0f0f11')
     ax.set_xlim(result.index[0], result.index[-1])
@@ -1803,10 +1940,10 @@ def plot_new_macro_signals(result, out_dir):
     ax = fig.add_subplot(gs8[1, 1])
     ax.set_facecolor('#0f0f11')
     regimes_order = ['Bull', 'Bear', 'HighVol', 'Sideways']
-    macro_cols = ['YieldCurve', 'CPI', 'IIP']
+    macro_cols = ['YieldCurve', 'CPI', 'WPI', 'IIP'] if 'WPI' in result.columns else ['YieldCurve', 'CPI', 'IIP']
     x_pos = np.arange(len(regimes_order))
-    w = 0.25
-    line_colors = ['#a78bfa', '#f59e0b', '#34d399']
+    w = 0.19
+    line_colors = ['#a78bfa', '#f59e0b', '#38bdf8', '#34d399']
     for j, (col, lc) in enumerate(zip(macro_cols, line_colors)):
         means = [result.loc[result['Regime']==r, col].mean() for r in regimes_order]
         ax.bar(x_pos + j*w, means, w, label=col, color=lc, alpha=0.8)
@@ -1958,6 +2095,7 @@ class MarketFeatures(BaseModel):
     yield_curve:    float = Field(..., description="10Y - 2Y sovereign yield curve spread (%)")
     cpi_yoy:        float = Field(..., description="Consumer Price Index YoY inflation (%)")
     iip_yoy:        float = Field(..., description="Index of Industrial Production YoY growth (%)")
+    wpi_yoy:        float = Field(..., description="Wholesale Price Index YoY inflation (%)")
     real_rate:      float = Field(..., description="Real policy rate: Repo Rate - CPI (%)")
 
 REGIME_EXPOSURE = {
@@ -1989,6 +2127,7 @@ def predict_regime(features: MarketFeatures):
         features.yield_curve,
         features.cpi_yoy,
         features.iip_yoy,
+        features.wpi_yoy,
         features.real_rate,
     ]])
 
@@ -2047,6 +2186,7 @@ def current_regime():
         "nifty": float(latest.get("NIFTY", 0)),
         "vix": float(latest.get("VIX", 0)),
         "cpi": float(latest.get("CPI", 0)),
+        "wpi": float(latest.get("WPI", 0)),
         "yield_curve": float(latest.get("YieldCurve", 0)),
         "posteriors": probs,
         "market_exposure": round(exp, 4),
@@ -2132,8 +2272,8 @@ def main():
     print(f"\n  ┌── Performance Comparison: Sector Rotation vs Buy & Hold ────┐")
     print(f"  │  Metric          Sector Rotation  Buy & Hold             │")
     for k, label in [('ann_return','Ann. Return'), ('sharpe','Sharpe'),
-                     ('sortino','Sortino'), ('max_dd','Max Drawdown'),
-                     ('calmar','Calmar'), ('win_rate','Win Rate')]:
+                     ('sortino','Sortino'), ('profit_factor','Profit Factor'),
+                     ('max_dd','Max Drawdown'), ('calmar','Calmar'), ('win_rate','Win Rate')]:
         hv = metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
         bv = bh_metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
         sfx = '%' if k in ('ann_return','max_dd','win_rate') else ''
@@ -2189,6 +2329,9 @@ def main():
     print(f"  India VIX            : {latest_row.get('VIX', 0):.2f}")
     print(f"  10Y G-Sec Yield      : {latest_row.get('GSecYield10', 0):.2f}%")
     print(f"  Yield Curve (10Y-2Y) : {latest_row.get('YieldCurve', 0):.2f}%")
+    print(f"  CPI Inflation        : {latest_row.get('CPI', 0):.2f}%")
+    print(f"  WPI Inflation        : {latest_row.get('WPI', 0):.2f}%")
+    print(f"  IIP Growth (YoY)     : {latest_row.get('IIP', 0):.2f}%")
     print(f"  Posterior Probs      : Bull={bull_p:.1f}% | Bear={bear_p:.1f}% | HighVol={hv_p:.1f}% | Sideways={sw_p:.1f}%")
     print(f"  Target Exposure      : Equity: {eq_exp}%  |  Cash / Liquid: {cash_exp}%")
     if sector_str:
@@ -2225,7 +2368,7 @@ def main():
     plot_new_macro_signals(result, OUT_DIR)
 
     # ── 13. Save regime history CSV ───────────────────────────────────
-    out_cols = ['NIFTY','Returns','VIX','RepoRate','YieldCurve','CPI','IIP',
+    out_cols = ['NIFTY','Returns','VIX','RepoRate','GSecYield10','YieldCurve','CPI','IIP','WPI',
                 'Regime','Bull','Bear','HighVol','Sideways']
     result[out_cols].to_csv(f'{OUT_DIR}/regime_history_v2.csv')
     print(f"\n✓ Regime history CSV saved")
