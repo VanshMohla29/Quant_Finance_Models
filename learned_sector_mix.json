@@ -1,0 +1,46 @@
+{
+  "Bull": {
+    "NIFTY Bank": 0.37,
+    "NIFTY IT": 0.01,
+    "NIFTY FMCG": 0.046,
+    "NIFTY Pharma": 0.0,
+    "NIFTY Auto": 0.0,
+    "NIFTY Metal": 0.291,
+    "NIFTY Realty": 0.0,
+    "NIFTY Infra": 0.0,
+    "NIFTY Energy": 0.282
+  },
+  "Bear": {
+    "NIFTY Bank": 0.0,
+    "NIFTY IT": 0.177,
+    "NIFTY FMCG": 0.0,
+    "NIFTY Pharma": 0.0,
+    "NIFTY Auto": 0.4,
+    "NIFTY Metal": 0.0,
+    "NIFTY Realty": 0.152,
+    "NIFTY Infra": 0.0,
+    "NIFTY Energy": 0.271
+  },
+  "HighVol": {
+    "NIFTY Bank": 0.0,
+    "NIFTY IT": 0.4,
+    "NIFTY FMCG": 0.0,
+    "NIFTY Pharma": 0.4,
+    "NIFTY Auto": 0.2,
+    "NIFTY Metal": 0.0,
+    "NIFTY Realty": 0.0,
+    "NIFTY Infra": 0.0,
+    "NIFTY Energy": 0.0
+  },
+  "Sideways": {
+    "NIFTY Bank": 0.4,
+    "NIFTY IT": 0.0,
+    "NIFTY FMCG": 0.2,
+    "NIFTY Pharma": 0.0,
+    "NIFTY Auto": 0.0,
+    "NIFTY Metal": 0.0,
+    "NIFTY Realty": 0.4,
+    "NIFTY Infra": 0.0,
+    "NIFTY Energy": 0.0
+  }
+}
