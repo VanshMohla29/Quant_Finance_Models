@@ -11,6 +11,7 @@ Uses 100% real live data from NSE and official economic endpoints:
   - Official Consumer Price Index (CPI YoY: INDCPIALLMINMEI) via FRED
   - Official Industrial Production Index (IIP YoY: INDPRMNTO01GYSAM) via FRED
   - Official Central Bank / Call Money Policy Rate (IRSTCI01INM156N) via FRED
+  - Official Wholesale Price Index YoY (monthly_index_YYYYMM.xls) via eaindustry.nic.in
 
 NO synthetic, calibrated, or simulated data is used.
 """
