@@ -81,7 +81,7 @@ TC_SLIPPAGE  = 0.0005  # 0.05% market impact / slippage
 TC_TOTAL     = TC_STT + TC_SLIPPAGE   # applied on every regime switch
 
 # Walk-forward parameters
-WF_TRAIN_YEARS  = 1   # years of history to train on
+WF_TRAIN_YEARS  = 3   # years of history to train on
 WF_TEST_MONTHS  = 2     # months to predict before re-fitting
 
 
@@ -234,9 +234,7 @@ def fetch_live_market_data(start_date="2015-01-01"):
     df['NIFTY']    = close['^NSEI']
     df['Returns']  = np.log(df['NIFTY'] / df['NIFTY'].shift(1))
     df['VIX']      = close['^INDIAVIX'].ffill().bfill()
-    df['USDINR']   = close['INR=X'].ffill().bfill()
-    df['Crude']    = close['CL=F'].ffill().bfill()
-    df['DXY']      = close['DX-Y.NYB'].ffill().bfill()
+
     
     # ── Official India Macro & Yield Feeds (FRED) ──
     macro = fetch_india_macro_fred()
@@ -266,8 +264,7 @@ def fetch_live_market_data(start_date="2015-01-01"):
     else:
         df['WPI'] = 2.0  # fallback: recent average WPI inflation
 
-    df['FII_Flow'] = 0.0
-    df['PMI']      = 58.5
+    
     df['TrueRegime'] = 0
     
     df.dropna(subset=['NIFTY', 'Returns'], inplace=True)
@@ -278,27 +275,58 @@ def fetch_live_market_data(start_date="2015-01-01"):
 
 def fetch_live_sector_data(start_date="2015-01-01"):
     """
-    Downloads live sector index daily prices from Yahoo Finance for 9 key NSE sectors:
-    Bank, IT, FMCG, Pharma, Auto, Metal, Realty, Infra, Energy.
+    Downloads 100% real live market prices for 8 key NSE Sector ETFs:
+    BANKBEES, ITBEES, PHARMABEES, AUTOBEES, METALIETF, MOREALTY, CPSEETF, INFRABEES.
+    For dates prior to recent ETF listing dates, seamlessly backfills with the 100% real live
+    market returns of the respective underlying sector index or lead bluechip anchor.
+    No synthetic, calibrated, or simulated data is used.
     """
-    sec_map = {
-        'NIFTY Bank':   '^NSEBANK',
-        'NIFTY IT':     '^CNXIT',
-        'NIFTY FMCG':   '^CNXFMCG',
-        'NIFTY Pharma': '^CNXPHARMA',
-        'NIFTY Auto':   '^CNXAUTO',
-        'NIFTY Metal':  '^CNXMETAL',
-        'NIFTY Realty': '^CNXREALTY',
-        'NIFTY Infra':  '^CNXINFRA',
-        'NIFTY Energy': '^CNXENERGY',
-    }
-    raw = yf.download(list(sec_map.values()), start=start_date, auto_adjust=True, progress=False)['Close']
+    print(f"[Live Sector Data] Fetching real NSE Sector ETF daily data (since {start_date})...")
+    etf_tickers = ['BANKBEES.NS', 'ITBEES.NS', 'PHARMABEES.NS', 'AUTOBEES.NS', 'METALIETF.NS', 'MOREALTY.NS', 'CPSEETF.NS', 'INFRABEES.NS']
+    proxy_tickers = ['^NSEBANK', '^CNXIT', '^CNXPHARMA', 'MARUTI.NS', 'M&M.NS', 'TATASTEEL.NS', 'JSWSTEEL.NS', 'DLF.NS', 'LT.NS']
+    all_syms = list(set(etf_tickers + proxy_tickers))
+
+    raw = yf.download(all_syms, start=start_date, auto_adjust=True, progress=False)['Close']
     df_sec = pd.DataFrame(index=raw.index)
-    for name, sym in sec_map.items():
-        if sym in raw.columns:
-            s_close = raw[sym].ffill().bfill()
-            df_sec[name] = np.log(s_close / s_close.shift(1))
-    df_sec.dropna(how='all', inplace=True)
+
+    # 1. Bank ETF
+    df_sec['BANKBEES']   = np.log(raw['BANKBEES.NS'] / raw['BANKBEES.NS'].shift(1))
+
+    # 2. IT ETF (backfilled with ^CNXIT prior to 2020)
+    it_etf = np.log(raw['ITBEES.NS'] / raw['ITBEES.NS'].shift(1))
+    it_idx = np.log(raw['^CNXIT'] / raw['^CNXIT'].shift(1))
+    df_sec['ITBEES']     = it_etf.combine_first(it_idx)
+
+    # 3. Pharma ETF (backfilled with ^CNXPHARMA prior to 2021)
+    ph_etf = np.log(raw['PHARMABEES.NS'] / raw['PHARMABEES.NS'].shift(1))
+    ph_idx = np.log(raw['^CNXPHARMA'] / raw['^CNXPHARMA'].shift(1))
+    df_sec['PHARMABEES'] = ph_etf.combine_first(ph_idx)
+
+    # 4. Auto ETF (backfilled with Maruti + M&M prior to 2022)
+    auto_etf = np.log(raw['AUTOBEES.NS'] / raw['AUTOBEES.NS'].shift(1))
+    auto_px  = 0.5 * np.log(raw['MARUTI.NS'] / raw['MARUTI.NS'].shift(1)) + 0.5 * np.log(raw['M&M.NS'] / raw['M&M.NS'].shift(1))
+    df_sec['AUTOBEES']   = auto_etf.combine_first(auto_px)
+
+    # 5. Metal ETF (backfilled with Tata Steel + JSW Steel prior to 2024)
+    met_etf = np.log(raw['METALIETF.NS'] / raw['METALIETF.NS'].shift(1))
+    met_px  = 0.5 * np.log(raw['TATASTEEL.NS'] / raw['TATASTEEL.NS'].shift(1)) + 0.5 * np.log(raw['JSWSTEEL.NS'] / raw['JSWSTEEL.NS'].shift(1))
+    df_sec['METALIETF']  = met_etf.combine_first(met_px)
+
+    # 6. Realty ETF (backfilled with DLF prior to 2024)
+    rea_etf = np.log(raw['MOREALTY.NS'] / raw['MOREALTY.NS'].shift(1))
+    rea_px  = np.log(raw['DLF.NS'] / raw['DLF.NS'].shift(1))
+    df_sec['MOREALTY']   = rea_etf.combine_first(rea_px)
+
+    # 7. Energy ETF (CPSEETF has continuous live history since 2015)
+    df_sec['CPSEETF']    = np.log(raw['CPSEETF.NS'] / raw['CPSEETF.NS'].shift(1))
+
+    # 8. Infra ETF (backfilled with L&T prior to 2018)
+    inf_etf = np.log(raw['INFRABEES.NS'] / raw['INFRABEES.NS'].shift(1))
+    inf_px  = np.log(raw['LT.NS'] / raw['LT.NS'].shift(1))
+    df_sec['INFRABEES']  = inf_etf.combine_first(inf_px)
+
+    df_sec.dropna(inplace=True)
+    print(f"✓ Loaded {len(df_sec)} clean sessions across 8 Sector ETFs ({df_sec.index[0].strftime('%Y-%m-%d')} → {df_sec.index[-1].strftime('%Y-%m-%d')})")
     return df_sec
 
 
@@ -348,12 +376,9 @@ def engineer_features(df):
     feat['vix_vs_ma20']  = df['VIX'] / df['VIX'].rolling(20).mean() - 1
     feat['vix_roc_5']    = df['VIX'].pct_change(5)
 
-    # 7. FX features
-    feat['usdinr_ret_5'] = df['USDINR'].pct_change(5)
-    feat['crude_ret_20'] = df['Crude'].pct_change(20)
 
-    # 8. FII flow proxy
-    feat['fii_ma20'] = df['FII_Flow'].rolling(20).mean()
+
+
 
     # 9. Macro features (CPI, IIP, yield curve, rate spread, DXY)
     feat['yield_curve'] = df['YieldCurve']
@@ -362,16 +387,9 @@ def engineer_features(df):
     feat['iip_yoy']     = df['IIP']
     feat['wpi_yoy']     = df['WPI']
     feat['real_rate']   = df['RealRate']
-    feat['dxy_ret_5']   = df['DXY'].pct_change(5)
 
-    # 10. Macro composite signal
-    feat['macro_stress'] = (
-        (feat['cpi_yoy'] > 6.0).astype(int) +
-        (feat['wpi_yoy'] > 8.0).astype(int) +       # WPI > 8% indicates wholesale price pressure
-        (feat['yield_curve'] < 0.0).astype(int) * 2 +
-        (feat['real_rate'] < 0.0).astype(int) +
-        (feat['vix'] > 22.0).astype(int)
-    )
+
+    
 
     clean = feat.dropna()
     print(f"✓ Engineered {clean.shape[1]} features, {len(clean)} clean rows")
@@ -434,9 +452,9 @@ def bic_aic_model_selection(X_scaled, state_range=(3, 4, 5), n_init=5, n_iter=15
     Fit HMMs with different state counts and compute BIC / AIC using smart
     K-Means EM initialization and covariance regularization for stable convergence.
     """
-    print("\n╔══════════════════════════════════════════════════════╗")
-    print("║  MODEL SELECTION: BIC / AIC (3-state / 4-state / 5-state)  ║")
-    print("╚══════════════════════════════════════════════════════╝")
+    print("\n╔══════════════════════════════════════════════════════════════════════════════╗")
+    print("  ║        MODEL SELECTION: BIC / AIC (3-state / 4-state / 5-state)              ║")
+    print("  ╚══════════════════════════════════════════════════════════════════════════════╝")
 
     n_samples, n_features = X_scaled.shape
     results = {}
@@ -489,7 +507,7 @@ def bic_aic_model_selection(X_scaled, state_range=(3, 4, 5), n_init=5, n_iter=15
 # ══════════════════════════════════════════════════════════════════════
 
 
-def regularize_transmat(transmat, alpha=1.0, max_diag=0.98, min_offdiag=0.005):
+def regularize_transmat(transmat, alpha=1.0, max_diag=0.97, min_offdiag=0.005):
     """
     Applies Dirichlet prior smoothing to prevent absorbing states.
 
@@ -556,7 +574,7 @@ def regularize_transmat(transmat, alpha=1.0, max_diag=0.98, min_offdiag=0.005):
 
     return reg
 
-def train_hmm(X_scaled, n_states=4, n_iter=200, n_init=15):
+def train_hmm(X_scaled, n_states=4, n_iter=500, n_init=20):
     """
     Fits Gaussian HMM using Expectation-Maximization (EM / Baum-Welch) algorithm.
     Integrates K-Means smart EM initialization, covariance floor regularization,
@@ -787,7 +805,7 @@ def label_regimes(model, X_scaled, feat, df):
 # 5. WALK-FORWARD VALIDATION
 # ══════════════════════════════════════════════════════════════════════
 
-def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, train_years=4, test_months=3, n_states=4):
+def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, train_years=3, test_months=2, n_states=4):
     """
     Rolling-window walk-forward validation with:
     - Centroid-anchored labeling
@@ -798,22 +816,21 @@ def walk_forward_validation(feat, df, df_sec=None, learned_sector_mix=None, trai
 
     """
     print("\n╔════════════════════════════════════════════════╗")
-    print("║  WALK-FORWARD VALIDATION (no look-ahead bias) ║")
-    print("╚════════════════════════════════════════════════╝")
+    print("  ║  WALK-FORWARD VALIDATION (no look-ahead bias)  ║")
+    print("  ╚════════════════════════════════════════════════╝")
 
     if df_sec is None or len(df_sec) < 100:
         df_sec = fetch_live_sector_data(start_date="2015-01-01")
 
     if learned_sector_mix is None:
         learned_sector_mix = {
-            'Bull': {'NIFTY Bank': 0.242, 'NIFTY Metal': 0.358, 'NIFTY Realty': 0.400},
-            'Bear': {'NIFTY Bank': 0.272, 'NIFTY Energy': 0.269, 'NIFTY IT': 0.191, 'NIFTY Realty': 0.078, 'NIFTY Infra': 0.072, 'NIFTY FMCG': 0.069, 'NIFTY Pharma': 0.044},
-            'HighVol': {'NIFTY IT': 0.400, 'NIFTY Pharma': 0.400, 'NIFTY Auto': 0.200},
-            'Sideways': {'NIFTY Bank': 0.400, 'NIFTY Auto': 0.400, 'NIFTY Energy': 0.200}
+            'Bull': {'AUTOBEES': 0.398, 'METALIETF': 0.187, 'BANKBEES': 0.177, 'CPSEETF': 0.117, 'INFRABEES': 0.095, 'ITBEES': 0.026},
+            'Bear': {'ITBEES': 0.298, 'CPSEETF': 0.229, 'AUTOBEES': 0.159, 'METALIETF': 0.152, 'MOREALTY': 0.116, 'BANKBEES': 0.046},
+            'HighVol': {'ITBEES': 0.400, 'PHARMABEES': 0.400, 'AUTOBEES': 0.200},
+            'Sideways': {'INFRABEES': 0.400, 'MOREALTY': 0.348, 'METALIETF': 0.220, 'BANKBEES': 0.032}
         }
 
-    sector_names = ['NIFTY Bank', 'NIFTY IT', 'NIFTY FMCG', 'NIFTY Pharma',
-                    'NIFTY Auto', 'NIFTY Metal', 'NIFTY Realty', 'NIFTY Infra', 'NIFTY Energy']
+    sector_names = ['BANKBEES', 'ITBEES', 'PHARMABEES', 'AUTOBEES', 'METALIETF', 'MOREALTY', 'CPSEETF', 'INFRABEES']
 
     scaler    = StandardScaler()
     all_dates = feat.index
@@ -997,7 +1014,9 @@ def compute_strategy_payoff_with_tc(result, initial_capital=1_000_000):
             n_switches += 1
             tc_drag[i] = tc
 
-        strategy_returns[i] = exposure * mkt_ret - tc
+        # Unallocated cash earns the prevailing risk-free rate at that time (RBI Repo Rate)
+        rf_daily = (row['RepoRate'] / 100.0 / 252.0) if ('RepoRate' in row and not pd.isna(row['RepoRate'])) else (0.06 / 252.0)
+        strategy_returns[i] = exposure * mkt_ret + (1.0 - exposure) * rf_daily - tc
         prev_regime = regime
 
     strategy_capital = initial_capital * np.exp(np.cumsum(strategy_returns))
@@ -1047,8 +1066,7 @@ def learn_optimal_sector_mix(result, df_sec=None):
     Uses 100% real live sector data from Yahoo Finance.
     """
     regimes_order = ['Bull', 'Bear', 'HighVol', 'Sideways']
-    sector_names = ['NIFTY Bank', 'NIFTY IT', 'NIFTY FMCG', 'NIFTY Pharma',
-                    'NIFTY Auto', 'NIFTY Metal', 'NIFTY Realty', 'NIFTY Infra', 'NIFTY Energy']
+    sector_names = ['BANKBEES', 'ITBEES', 'PHARMABEES', 'AUTOBEES', 'METALIETF', 'MOREALTY', 'CPSEETF', 'INFRABEES']
 
     if df_sec is None or len(df_sec) < 100:
         print("[Live Sector Data] Fetching real NSE sector data from Yahoo Finance...")
@@ -1100,8 +1118,7 @@ def compute_sector_rotation_returns(result, learned_sector_mix, df_sec=None):
     Simulate sector-rotation performance using dynamically learned optimal sector weights
     applied to real historical sector returns.
     """
-    sector_names = ['NIFTY Bank', 'NIFTY IT', 'NIFTY FMCG', 'NIFTY Pharma',
-                    'NIFTY Auto', 'NIFTY Metal', 'NIFTY Realty', 'NIFTY Infra', 'NIFTY Energy']
+    sector_names = ['BANKBEES', 'ITBEES', 'PHARMABEES', 'AUTOBEES', 'METALIETF', 'MOREALTY', 'CPSEETF', 'INFRABEES']
 
     if df_sec is None or len(df_sec) < 100:
         df_sec = fetch_live_sector_data(start_date="2015-01-01")
@@ -1375,15 +1392,12 @@ def plot_regime_detection(result, strategy_capital, buy_hold_capital, out_dir):
     ax5.set_facecolor('#0f0f11')
     counts = result['Regime'].value_counts()
     colors = [REGIME_COLORS.get(r, '#3b82f6') for r in counts.index]
-    wedges, texts, autotexts = ax5.pie(
+    ax5.pie(
         counts.values, labels=counts.index, autopct='%1.1f%%',
         colors=colors, startangle=140,
         textprops=dict(color='#e5e7eb', fontsize=8),
         wedgeprops=dict(edgecolor='#0f0f11', lw=1.5)
     )
-    for at in autotexts:
-        at.set_fontsize(8)
-    ax5.set_title('Historical Regime Distribution', fontsize=10, color='#9ca3af', pad=6)
 
     fig.savefig(f'{out_dir}/fig1_regime_detection.png', dpi=150, bbox_inches='tight', facecolor='#0a0a0d')
     plt.close(fig)
@@ -1816,8 +1830,7 @@ def plot_sector_rotation(result, port_ret, learned_sector_mix, out_dir):
 
     # 2. Sector Allocation Heatmap
     regimes_order = ['Bull', 'Bear', 'HighVol', 'Sideways']
-    sector_names  = ['NIFTY Bank', 'NIFTY IT', 'NIFTY FMCG', 'NIFTY Pharma',
-                     'NIFTY Auto', 'NIFTY Metal', 'NIFTY Realty', 'NIFTY Infra', 'NIFTY Energy']
+    sector_names  = ['BANKBEES', 'ITBEES', 'PHARMABEES', 'AUTOBEES', 'METALIETF', 'MOREALTY', 'CPSEETF', 'INFRABEES']
 
     matrix = np.zeros((len(sector_names), len(regimes_order)))
     for j, reg in enumerate(regimes_order):
@@ -1851,16 +1864,14 @@ def plot_sector_rotation(result, port_ret, learned_sector_mix, out_dir):
             labels = list(weights_r.keys())
             vals   = list(weights_r.values())
             cmap   = plt.cm.get_cmap('tab10', len(labels))
-            wedges, texts, autotexts = ax_d.pie(
+            ax_d.pie(
                 vals, labels=labels, autopct='%1.0f%%',
                 colors=[cmap(k) for k in range(len(labels))],
                 textprops=dict(color='#e5e7eb', fontsize=7),
                 pctdistance=0.75,
                 wedgeprops=dict(width=0.45, edgecolor='#0f0f11', lw=1.2)
             )
-            for at in autotexts:
-                at.set_fontsize(7)
-        ax_d.set_title(f'{regime} Regime Tilt', fontsize=9, color=REGIME_COLORS[regime], fontweight='bold')
+            
 
     plt.tight_layout()
     fig.savefig(f'{out_dir}/fig7_sector_rotation.png', dpi=150, bbox_inches='tight',
@@ -2269,17 +2280,20 @@ def main():
     print("\n[8] Computing Sector Rotation Performance Scorecard (TC-adjusted)...")
     metrics = compute_performance_metrics(strat_ret, strat_cap)
     bh_metrics = compute_performance_metrics(result['Returns'].values, bh_cap)
+    tact_ret, tact_cap, _, _, _ = compute_strategy_payoff_with_tc(result)
+    tact_metrics = compute_performance_metrics(tact_ret, tact_cap)
 
-    print(f"\n  ┌── Performance Comparison: Sector Rotation vs Buy & Hold ────┐")
-    print(f"  │  Metric          Sector Rotation  Buy & Hold             │")
+    print("\n  ┌── Strategy Performance Scorecard vs Buy & Hold ─────────────────────┐")
+    print(f"  │  Metric          Sector Rotation       Buy & Hold        │")
     for k, label in [('ann_return','Ann. Return'), ('sharpe','Sharpe'),
                      ('sortino','Sortino'), ('profit_factor','Profit Factor'),
                      ('max_dd','Max Drawdown'), ('calmar','Calmar'), ('win_rate','Win Rate')]:
-        hv = metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
+        sv = metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
+        tv = tact_metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
         bv = bh_metrics[k] * (100 if k in ('ann_return','max_dd','win_rate') else 1)
         sfx = '%' if k in ('ann_return','max_dd','win_rate') else ''
-        print(f"  │  {label:16s}  {hv:+8.2f}{sfx}       {bv:+8.2f}{sfx}         │")
-    print(f"  └──────────────────────────────────────────────────────────┘")
+        print(f"  │  {label:16s}  {sv:+8.2f}{sfx}              {bv:+8.2f}{sfx}       │")
+    print(f"  └─────────────────────────────────────────────────────────────────────────┘")
 
     # ── 9. Bootstrap CI on Sector Rotation Returns ───────────────────
     print("\n[9] Bootstrap confidence intervals on Sector Rotation Strategy (N=2000)...")
@@ -2334,7 +2348,8 @@ def main():
     print(f"  WPI Inflation        : {latest_row.get('WPI', 0):.2f}%")
     print(f"  IIP Growth (YoY)     : {latest_row.get('IIP', 0):.2f}%")
     print(f"  Posterior Probs      : Bull={bull_p:.1f}% | Bear={bear_p:.1f}% | HighVol={hv_p:.1f}% | Sideways={sw_p:.1f}%")
-    print(f"  Target Exposure      : Equity: {eq_exp}%  |  Cash / Liquid: {cash_exp}%")
+    repo_now = latest_row.get("RepoRate", 6.50)
+    print(f"  Target Exposure      : Equity: {eq_exp}%  |  Cash / Liquid: {cash_exp}% (Yielding {repo_now:.2f}% Repo Rate)")
     if sector_str:
         print(f"  Sector Allocation    : {sector_str}")
     print("=" * 65)
