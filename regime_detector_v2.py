@@ -1205,29 +1205,82 @@ class RegimeAlertSystem:
             return {'smtp_host': host, 'smtp_port': port, 'from': user, 'password': pwd, 'to': to}
         return None
 
-    def check_and_alert(self, result):
+    def check_and_alert(self, result, send_daily_digest=True):
         latest = result.iloc[-1]
         current_regime = latest['Regime']
+        prev_regime = result['Regime'].iloc[-2] if len(result) > 1 else self._last_regime
 
-        if self._last_regime is None:
-            self._last_regime = current_regime
-            print(f"[Alert] System initialised. Current regime: {current_regime}")
-            return None
-
-        if current_regime != self._last_regime:
-            msg = self._compose_message(self._last_regime, current_regime, latest)
+        # 1. Regime Transition Alert (Sent if regime changed on the latest bar)
+        if prev_regime is not None and current_regime != prev_regime:
+            transition_msg = self._compose_message(prev_regime, current_regime, latest)
             print(f"\n============================================================")
-            print(msg)
+            print(transition_msg)
             print(f"============================================================")
-            self._send_email(msg)
-            self._send_telegram(msg)
-            self._alert_history.append({'date': str(latest.name)[:10], 'from': self._last_regime, 'to': current_regime})
-            self._last_regime = current_regime
-            return msg
+            self._send_email(transition_msg)
+            self._send_telegram(transition_msg)
+            self._alert_history.append({'date': str(latest.name)[:10], 'from': prev_regime, 'to': current_regime})
         else:
             p_val = latest.get(current_regime, 0.0) * 100
             print(f"[Alert] No regime change. Current: {current_regime} (P={p_val:.0f}%)")
-            return None
+
+        # 2. Daily EOD Market Status Digest (Sent every trading day)
+        if send_daily_digest:
+            daily_msg = self._compose_daily_digest(latest)
+            self._send_telegram(daily_msg)
+
+        self._last_regime = current_regime
+        return current_regime
+
+    def _compose_daily_digest(self, latest_row):
+        nifty = latest_row.get('NIFTY', 0)
+        ret   = latest_row.get('Returns', 0) * 100
+        vix   = latest_row.get('VIX', 0)
+        cpi   = latest_row.get('CPI', 0)
+        wpi   = latest_row.get('WPI', 0)
+        yc    = latest_row.get('YieldCurve', 0)
+        curr_reg = latest_row.get('Regime', 'Sideways')
+        repo_now = latest_row.get('RepoRate', 6.50)
+        date_str = latest_row.name.strftime('%d %b %Y') if hasattr(latest_row.name, 'strftime') else 'Today'
+
+        bull_p = latest_row.get('Bull', 0) * 100
+        bear_p = latest_row.get('Bear', 0) * 100
+        hv_p   = latest_row.get('HighVol', 0) * 100
+        sw_p   = latest_row.get('Sideways', 0) * 100
+
+        eq_exp = int(round((
+            (bull_p / 100.0) * REGIME_EXPOSURE.get('Bull', 1.0) +
+            (bear_p / 100.0) * REGIME_EXPOSURE.get('Bear', 0.0) +
+            (hv_p / 100.0)   * REGIME_EXPOSURE.get('HighVol', 0.2) +
+            (sw_p / 100.0)   * REGIME_EXPOSURE.get('Sideways', 0.6)
+        ) * 100))
+        cash_exp = max(0, 100 - eq_exp)
+
+        sector_str = ""
+        if self.learned_sector_mix and curr_reg in self.learned_sector_mix:
+            top_s = sorted(self.learned_sector_mix[curr_reg].items(), key=lambda x: x[1], reverse=True)
+            top_parts = [f"{s.replace('NIFTY ', '')}: {w*100:.1f}%" for s, w in top_s if w > 0.01]
+            if top_parts:
+                sector_str = "\nSector Allocation:\n  " + " | ".join(top_parts) + "\n"
+
+        msg = f"""
+📊 INDIA MARKET REGIME — DAILY STATUS ({date_str})
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Active Regime : {curr_reg.upper()}
+NIFTY 50      : {nifty:,.2f} ({ret:+.2f}%)
+India VIX     : {vix:.2f}
+10Y G-Sec     : {latest_row.get('GSecYield10', 0):.2f}%
+Yield Curve   : {yc:.2f}% (10Y-2Y)
+Inflation     : CPI {cpi:.2f}% | WPI {wpi:.2f}%
+
+Posterior Probabilities:
+  Bull={bull_p:.1f}% | Bear={bear_p:.1f}% | HighVol={hv_p:.1f}% | Sideways={sw_p:.1f}%
+
+Target Model Exposure:
+  Equity: {eq_exp}% | Cash / Liquid: {cash_exp}% (Yielding {repo_now:.2f}% Repo Rate)
+{sector_str}
+⚠ Quantitative model output, not financial advice.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        return msg.strip()
 
     def _compose_message(self, prev_regime, new_regime, latest_row):
         nifty = latest_row.get('NIFTY', 0)
@@ -1307,8 +1360,16 @@ Target Model Exposure:
             url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
             payload = json.dumps({'chat_id': self.telegram_chat_id, 'text': msg, 'parse_mode': 'Markdown'}).encode()
             req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=10):
-                print("[Alert] ✓ Telegram message sent")
+            try:
+                with urllib.request.urlopen(req, timeout=10):
+                    print("[Alert] ✓ Telegram message sent")
+                    return
+            except Exception:
+                # Plaintext fallback if markdown parsing fails
+                payload = json.dumps({'chat_id': self.telegram_chat_id, 'text': msg}).encode()
+                req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+                with urllib.request.urlopen(req, timeout=10):
+                    print("[Alert] ✓ Telegram message sent (plaintext fallback)")
         except Exception as e:
             print(f"[Alert] Telegram error: {e}")
 
@@ -2353,6 +2414,9 @@ def main():
     if sector_str:
         print(f"  Sector Allocation    : {sector_str}")
     print("=" * 65)
+
+    # ── Dispatch Telegram & Email Alerts (Transition alert if changed + Daily Digest) ──
+    alerter.check_and_alert(result, send_daily_digest=True)
 
     # ── Save model artifacts for REST API ────────────────────────────
     os.makedirs(OUT_DIR, exist_ok=True)
