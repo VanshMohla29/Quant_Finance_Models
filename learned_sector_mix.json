@@ -3,10 +3,10 @@
     "BANKBEES": 0.177,
     "ITBEES": 0.026,
     "PHARMABEES": 0.0,
-    "AUTOBEES": 0.398,
+    "AUTOBEES": 0.397,
     "METALIETF": 0.187,
     "MOREALTY": 0.0,
-    "CPSEETF": 0.117,
+    "CPSEETF": 0.118,
     "INFRABEES": 0.095
   },
   "Bear": {
@@ -30,11 +30,16 @@
     "INFRABEES": 0.0
   },
   "Sideways": {
-    "BANKBEES": 0.032,
+    "BANKBEES": 0.028,
     "ITBEES": 0.0,
     "PHARMABEES": 0.0,
     "AUTOBEES": 0.0,
-    "METALIETF": 0.22,
+    "METALIETF": 0.216,
+    "MOREALTY": 0.356,
+    "CPSEETF": 0.0,
+    "INFRABEES": 0.4
+  }
+}    "METALIETF": 0.22,
     "MOREALTY": 0.348,
     "CPSEETF": 0.0,
     "INFRABEES": 0.4
